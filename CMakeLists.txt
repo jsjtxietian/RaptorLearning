@@ -4,49 +4,51 @@ project(RaptorEngine VERSION 0.1.0)
 
 find_package(Vulkan REQUIRED)
 
+set(CMAKE_SUPPRESS_REGENERATION true)
+
 add_library(RaptorFoundation STATIC
-    source/raptor/foundation/array.hpp
-    source/raptor/foundation/assert.cpp
-    source/raptor/foundation/assert.hpp
-    source/raptor/foundation/bit.cpp
-    source/raptor/foundation/bit.hpp
-    source/raptor/foundation/blob_serialization.cpp
-    source/raptor/foundation/blob_serialization.hpp
-    source/raptor/foundation/blob.hpp
-    source/raptor/foundation/camera.cpp
-    source/raptor/foundation/camera.hpp
-    source/raptor/foundation/color.cpp
-    source/raptor/foundation/color.hpp
-    source/raptor/foundation/data_structures.cpp
-    source/raptor/foundation/data_structures.hpp
-    source/raptor/foundation/file.cpp
-    source/raptor/foundation/file.hpp
-    source/raptor/foundation/gltf.cpp
-    source/raptor/foundation/gltf.hpp
-    source/raptor/foundation/hash_map.hpp
-    source/raptor/foundation/log.cpp
-    source/raptor/foundation/log.hpp
-    source/raptor/foundation/memory_utils.hpp
-    source/raptor/foundation/memory.cpp
-    source/raptor/foundation/memory.hpp
-    source/raptor/foundation/numerics.cpp
-    source/raptor/foundation/numerics.hpp
-    source/raptor/foundation/platform.hpp
-    source/raptor/foundation/process.cpp
-    source/raptor/foundation/process.hpp
-    source/raptor/foundation/relative_data_structures.hpp
-    source/raptor/foundation/resource_manager.cpp
-    source/raptor/foundation/resource_manager.hpp
-    source/raptor/foundation/serialization.cpp
-    source/raptor/foundation/serialization.hpp
-    source/raptor/foundation/service_manager.cpp
-    source/raptor/foundation/service_manager.hpp
-    source/raptor/foundation/service.cpp
-    source/raptor/foundation/service.hpp
-    source/raptor/foundation/string.cpp
-    source/raptor/foundation/string.hpp
-    source/raptor/foundation/time.cpp
-    source/raptor/foundation/time.hpp
+    source/foundation/array.hpp
+    source/foundation/assert.cpp
+    source/foundation/assert.hpp
+    source/foundation/bit.cpp
+    source/foundation/bit.hpp
+    source/foundation/blob_serialization.cpp
+    source/foundation/blob_serialization.hpp
+    source/foundation/blob.hpp
+    source/foundation/camera.cpp
+    source/foundation/camera.hpp
+    source/foundation/color.cpp
+    source/foundation/color.hpp
+    source/foundation/data_structures.cpp
+    source/foundation/data_structures.hpp
+    source/foundation/file.cpp
+    source/foundation/file.hpp
+    source/foundation/gltf.cpp
+    source/foundation/gltf.hpp
+    source/foundation/hash_map.hpp
+    source/foundation/log.cpp
+    source/foundation/log.hpp
+    source/foundation/memory_utils.hpp
+    source/foundation/memory.cpp
+    source/foundation/memory.hpp
+    source/foundation/numerics.cpp
+    source/foundation/numerics.hpp
+    source/foundation/platform.hpp
+    source/foundation/process.cpp
+    source/foundation/process.hpp
+    source/foundation/relative_data_structures.hpp
+    source/foundation/resource_manager.cpp
+    source/foundation/resource_manager.hpp
+    source/foundation/serialization.cpp
+    source/foundation/serialization.hpp
+    source/foundation/service_manager.cpp
+    source/foundation/service_manager.hpp
+    source/foundation/service.cpp
+    source/foundation/service.hpp
+    source/foundation/string.cpp
+    source/foundation/string.hpp
+    source/foundation/time.cpp
+    source/foundation/time.hpp
 )
 
 set_property(TARGET RaptorFoundation PROPERTY CXX_STANDARD 17)
@@ -65,18 +67,18 @@ target_include_directories(RaptorFoundation PRIVATE
 )
 
 add_library(RaptorApp STATIC
-    source/raptor/application/application.cpp
-    source/raptor/application/application.hpp
-    source/raptor/application/game_camera.cpp
-    source/raptor/application/game_camera.hpp
-    source/raptor/application/game_application.cpp
-    source/raptor/application/game_application.hpp
-    source/raptor/application/input.cpp
-    source/raptor/application/input.hpp
-    source/raptor/application/keys.cpp
-    source/raptor/application/keys.hpp
-    source/raptor/application/window.cpp
-    source/raptor/application/window.hpp
+    source/application/application.cpp
+    source/application/application.hpp
+    source/application/game_camera.cpp
+    source/application/game_camera.hpp
+    source/application/game_application.cpp
+    source/application/game_application.hpp
+    source/application/input.cpp
+    source/application/input.hpp
+    source/application/keys.cpp
+    source/application/keys.hpp
+    source/application/window.cpp
+    source/application/window.hpp
 )
 
 set_property(TARGET RaptorApp PROPERTY CXX_STANDARD 17)
@@ -91,7 +93,6 @@ target_compile_definitions(RaptorApp PRIVATE
 
 target_include_directories(RaptorApp PRIVATE
     source
-    source/raptor
     )
 
 if (WIN32)
@@ -164,7 +165,7 @@ target_compile_definitions(RaptorExternal PRIVATE
 if (WIN32)
     target_include_directories(RaptorExternal PRIVATE
         binaries/SDL2-2.0.18/include
-        source/raptor
+        source
     )
 else()
     target_link_libraries(RaptorExternal PRIVATE
@@ -176,4 +177,4 @@ endif()
 
 set_property(TARGET RaptorExternal PROPERTY CXX_STANDARD 17)
 
-add_subdirectory(source/chapter1)
+add_subdirectory(source/main)
