@@ -75,8 +75,6 @@ struct GPUTimestampManager {
 }; // struct GPUTimestampManager
 
 
-//
-//
 struct DeviceCreation {
 
     Allocator*                      allocator       = nullptr;
@@ -95,8 +93,16 @@ struct DeviceCreation {
 
 }; // struct DeviceCreation
 
-//
-//
+// Graphics resources are created using a creation struct containing all the necessary parameters
+// Resources are externally passed as handles, so they are easily copiable and safe to pass around
+
+// GpuDevice: 
+// Vulkan API abstractions and usage
+// Creation, destruction, and update of graphics resources
+// Swapchain creation, destruction, resize, and update
+// Command buffer requests and submission to the GPU
+// GPU timestamps management
+// GPU-CPU synchronization
 struct GpuDevice : public Service {
 
     static GpuDevice*               instance();

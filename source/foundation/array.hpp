@@ -21,7 +21,7 @@ namespace raptor {
         T&                          push_use();                 // Grow the size and return T to be filled.
 
         void                        pop();
-        void                        delete_swap( u32 index );
+        void                        delete_swap( u32 index ); // removes an element and swaps it with the last element.
 
         T&                          operator[]( u32 index );
         const T&                    operator[]( u32 index ) const;
