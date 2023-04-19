@@ -1,4 +1,4 @@
-add_executable(Chapter2
+add_executable(Chapter3
     graphics/command_buffer.cpp
     graphics/command_buffer.hpp
     graphics/gpu_device.cpp
@@ -19,45 +19,52 @@ add_executable(Chapter2
     main.cpp
 )
 
-set_property(TARGET Chapter2 PROPERTY CXX_STANDARD 17)
+set_property(TARGET Chapter3 PROPERTY CXX_STANDARD 17)
 
 if (WIN32)
-    target_compile_definitions(Chapter2 PRIVATE
+    target_compile_definitions(Chapter3 PRIVATE
         _CRT_SECURE_NO_WARNINGS
         WIN32_LEAN_AND_MEAN
         NOMINMAX)
 endif()
 
-target_compile_definitions(Chapter2 PRIVATE
+target_compile_definitions(Chapter3 PRIVATE
     RAPTOR_SHADER_FOLDER="${CMAKE_CURRENT_SOURCE_DIR}/shaders/"
 )
 
-target_compile_definitions(Chapter2 PRIVATE
+target_compile_definitions(Chapter3 PRIVATE
     TRACY_ENABLE
     TRACY_ON_DEMAND
     TRACY_NO_SYSTEM_TRACING
 )
 
-target_include_directories(Chapter2 PRIVATE
+target_include_directories(Chapter3 PRIVATE
     .
     ..
     ../raptor
+    ../../binaries/assimp/include
     ${Vulkan_INCLUDE_DIRS}
 )
 
 if (WIN32)
-    target_include_directories(Chapter2 PRIVATE
+    target_include_directories(Chapter3 PRIVATE
         ../../binaries/SDL2-2.0.18/include)
 
-    target_link_directories(Chapter2 PRIVATE
+    target_link_directories(Chapter3 PRIVATE
         ../../binaries/SDL2-2.0.18/lib/x64
+        ../../binaries/assimp/windows/bin
+        ../../binaries/assimp/windows/lib
     )
 else()
-    target_include_directories(Chapter2 PRIVATE
+    target_link_directories(Chapter3 PRIVATE
+        ../../binaries/assimp/linux/lib
+    )
+
+    target_include_directories(Chapter3 PRIVATE
         ${SDL2_INCLUDE_DIRS})
 endif()
 
-target_link_libraries(Chapter2 PRIVATE
+target_link_libraries(Chapter3 PRIVATE
     RaptorFoundation
     RaptorExternal
     RaptorApp
@@ -65,22 +72,25 @@ target_link_libraries(Chapter2 PRIVATE
 )
 
 if (WIN32)
-    target_link_libraries(Chapter2 PRIVATE
+    target_link_libraries(Chapter3 PRIVATE
+        assimp-vc142-mt
         SDL2)
 else()
-    target_link_libraries(Chapter2 PRIVATE
+    target_link_libraries(Chapter3 PRIVATE
         dl
         pthread
+        assimp
         SDL2::SDL2)
 endif()
 
 if (WIN32)
     set(DLLS_TO_COPY
         ${CMAKE_CURRENT_SOURCE_DIR}/../../binaries/SDL2-2.0.18/lib/x64/SDL2.dll
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../binaries/assimp/windows/bin/assimp-vc142-mt.dll
     )
 
     foreach(DLL ${DLLS_TO_COPY})
-        add_custom_command(TARGET Chapter2 POST_BUILD
+        add_custom_command(TARGET Chapter3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy ${DLL} "$(OutDir)"
             VERBATIM
         )
@@ -91,17 +101,17 @@ file(GLOB GLSL_SHADERS
     shaders/*.vert
     shaders/*.frag)
 
-add_custom_target(Chapter2SpvShaders
+add_custom_target(Chapter3SpvShaders
     SOURCES ${GLSL_SHADERS}
 )
 
 foreach (GLSL_SHADER ${GLSL_SHADERS})
-    add_custom_command(TARGET Chapter2SpvShaders
+    add_custom_command(TARGET Chapter3SpvShaders
         COMMAND $ENV{VULKAN_SDK}/bin/glslc ${GLSL_SHADER}
         DEPENDS ${GLSL_SHADER}
     )
 endforeach()
 
-add_dependencies(Chapter2
-    Chapter2SpvShaders
+add_dependencies(Chapter3
+    Chapter3SpvShaders
 )
