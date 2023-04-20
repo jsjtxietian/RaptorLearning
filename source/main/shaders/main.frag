@@ -98,6 +98,9 @@ float heaviside( float v ) {
 }
 
 void main() {
+    // https://github.com/KhronosGroup/GLSL/blob/master/extensions/ext/GL_EXT_nonuniform_qualifier.txt
+    // synchronize the programs between the different executions to properly read the texture index, in case the index
+    // is different across different threads of the same shader invocation.
     vec4 base_colour = texture(global_textures[nonuniformEXT(textures.x)], vTexcoord0) * base_color_factor;
 
     bool useAlphaMask = (flags & DrawFlags_AlphaMask) != 0;

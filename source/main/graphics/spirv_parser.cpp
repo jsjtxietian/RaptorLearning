@@ -69,6 +69,7 @@ VkShaderStageFlags parse_execution_model( SpvExecutionModel model )
 }
 
 void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer, ParseResult* parse_result ) {
+    // make sure that we are reading valid SPIR-V data
     RASSERT( ( data_size % 4 ) == 0 );
     u32 spv_word_count = safe_cast<u32>( data_size / 4 );
 
@@ -87,6 +88,7 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
 
     size_t word_index = 5;
     while ( word_index < spv_word_count ) {
+        // Each ID definition starts with the Op type and the number of words that it is composed of:
         SpvOp op = ( SpvOp )( data[ word_index ] & 0xFF );
         u16 word_count = ( u16 )( data[ word_index ] >> 16 );
 
@@ -97,13 +99,13 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
                 RASSERT( word_count >= 4 );
 
                 SpvExecutionModel model = ( SpvExecutionModel )data[ word_index + 1 ];
-
+                // translate it into a VkShaderStageFlags value
                 stage = parse_execution_model( model );
                 RASSERT( stage != 0 );
 
                 break;
             }
-
+            // parse the descriptor set index and binding:
             case ( SpvOpDecorate ):
             {
                 RASSERT( word_count >= 3 );
@@ -122,6 +124,7 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
                         break;
                     }
 
+                    // descriptor set index
                     case ( SpvDecorationDescriptorSet ):
                     {
                         id.set = data[ word_index + 3 ];
@@ -395,6 +398,7 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
         word_index += word_count;
     }
 
+    // loop over each ID entry and identify the ones we are interested in
     for ( u32 id_index = 0; id_index < ids.size; ++id_index ) {
         Id& id= ids[ id_index ];
 
@@ -409,6 +413,9 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
                     }
 
                     // NOTE(marco): get actual type
+                    // double indirection to retrieve the actual type of a variable: 
+                    // first, get the pointer type, and from the pointer type
+                    // then, get to the real type of the variable
                     Id& uniform_type = ids[ ids[ id.type_index ].type_index ];
 
                     DescriptorSetLayoutCreation& setLayout = parse_result->sets[ id.set ];

@@ -442,6 +442,7 @@ void GpuDevice::init( const DeviceCreation& creation ) {
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, k_max_bindless_resources },
         };
 
+        // allow the creation of descriptor sets that can be updated after they have been bound
         // Update after bind is needed here, for each binding and in the descriptor set layout creation.
         pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT_EXT;
         pool_info.maxSets = k_max_bindless_resources * ArraySize( pool_sizes_bindless );
@@ -1180,7 +1181,8 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
     bool cache_exists = file_exists( cache_path );
     if ( cache_path != nullptr && cache_exists ) {
         FileReadResult read_result = file_read_binary( cache_path, allocator );
-
+        // compare the values in the header against the values
+        // returned by the driver and GPU we are running on
         VkPipelineCacheHeaderVersionOne* cache_header = (VkPipelineCacheHeaderVersionOne*)read_result.data;
 
         if ( cache_header->deviceID == vulkan_physical_properties.deviceID &&
@@ -2730,6 +2732,8 @@ void GpuDevice::present() {
         command_buffer->current_render_pass = nullptr;
     }
 
+    // Before the next frame is processed, update the descriptor set 
+    // with any new textures that have been uploaded:
     if (texture_to_update_bindless.size) {
         // Handle deferred writes to bindless textures.
         VkWriteDescriptorSet bindless_descriptor_writes[k_max_bindless_resources];
@@ -2980,6 +2984,7 @@ void GpuDevice::set_present_mode( PresentMode::Enum mode ) {
     present_mode = mode_found ? mode : PresentMode::VSync;
 }
 
+// associate a specific sampler to a given texture.
 void GpuDevice::link_texture_sampler( TextureHandle texture, SamplerHandle sampler ) {
 
     Texture* texture_vk = access_texture( texture );
