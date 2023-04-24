@@ -193,8 +193,13 @@ struct UploadRequest {
     raptor::BufferHandle            gpu_buffer  = raptor::k_invalid_buffer;
 }; // struct UploadRequest
 
-//
-//
+// 
+// AsynchronousLoader:
+// Process load from file requests
+// Process GPU upload transfers
+// Manage a staging buffer to handle a copy of the data
+// Enqueue the command buffers with copy commands
+// Signal to the renderer that a texture has finished a transfer
 struct AsynchronousLoader {
 
     void                            init( raptor::Renderer* renderer, enki::TaskScheduler* task_scheduler, raptor::Allocator* resident_allocator );
@@ -397,7 +402,8 @@ struct ObjScene :  public Scene {
 // DrawTask ///////////////////////////////////////////////////////////////
 
 //
-//
+// enkiTS uses the TaskSet class as a unit of work, and it uses both inheritance and lambda
+// functions to drive the execution of tasks in the scheduler
 struct glTFDrawTask : public enki::ITaskSet {
 
     raptor::GpuDevice*              gpu         = nullptr;
@@ -1617,7 +1623,7 @@ void AsynchronousLoader::init( raptor::Renderer* renderer_, enki::TaskScheduler*
 
     using namespace raptor;
 
-    // Create a persistently-mapped staging buffer
+    // allocate a persistently mapped buffer of 64 MB (staging buffer)
     BufferCreation bc;
     bc.reset().set( VK_BUFFER_USAGE_TRANSFER_SRC_BIT, ResourceUsageType::Stream, rmega( 64 ) ).set_name( "staging_buffer" ).set_persistent( true );
     BufferHandle staging_buffer_handle = renderer->gpu->create_buffer( bc );
@@ -1626,6 +1632,10 @@ void AsynchronousLoader::init( raptor::Renderer* renderer_, enki::TaskScheduler*
 
     staging_buffer_offset = 0;
 
+    // https://github.com/KhronosGroup/Vulkan-Guide/blob/main/chapters/queues.adoc
+    // In some GPUs, there can be specialized queues that have only the VK_QUEUE_TRANSFER
+    // flag activated, means they can use direct memory access (DMA) to speed up the transfer
+    // of data between the CPU and the GPU.
     for ( u32 i = 0; i < GpuDevice::k_max_frames; ++i) {
         VkCommandPoolCreateInfo cmd_pool_info = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, nullptr };
         cmd_pool_info.queueFamilyIndex = renderer->gpu->vulkan_transfer_queue_family;
@@ -1700,6 +1710,7 @@ void AsynchronousLoader::update( raptor::Allocator* scratch_allocator ) {
             return;
         }
         // Reset if file requests are present.
+        // If it is signaled, reset it so we can let the API signal it when the submission is done:
         vkResetFences( renderer->gpu->vulkan_device, 1, &transfer_fence );
 
         // Get last request
@@ -1956,6 +1967,7 @@ int main( int argc, char** argv ) {
     // Start multithreading IO
     // Create IO threads at the end
     RunPinnedTaskLoopTask run_pinned_task;
+    // associate it with a thread ID:
     run_pinned_task.threadNum = task_scheduler.GetNumTaskThreads() - 1;
     run_pinned_task.task_scheduler = &task_scheduler;
     task_scheduler.AddPinnedTask( &run_pinned_task );

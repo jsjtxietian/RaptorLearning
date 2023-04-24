@@ -2,3 +2,4 @@ build/
 gltf/
 *.cache
 *.spv
+.vscode/

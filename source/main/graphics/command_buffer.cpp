@@ -687,6 +687,7 @@ void CommandBuffer::upload_texture_data( TextureHandle texture_handle, void* tex
     memcpy( staging_buffer->mapped_data + staging_buffer_offset, texture_data, static_cast< size_t >( image_size ) );
 
     VkBufferImageCopy region = {};
+    // specify the offset into the staging buffer
     region.bufferOffset = staging_buffer_offset;
     region.bufferRowLength = 0;
     region.bufferImageHeight = 0;
@@ -705,6 +706,7 @@ void CommandBuffer::upload_texture_data( TextureHandle texture_handle, void* tex
     vkCmdCopyBufferToImage( vk_command_buffer, staging_buffer->vk_buffer, texture->vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region );
 
     // Post copy memory barrier
+    // transfer ownership
     util_add_image_barrier_ext( vk_command_buffer, texture->vk_image, RESOURCE_STATE_COPY_DEST, RESOURCE_STATE_COPY_SOURCE,
                                 0, 1, false, device->vulkan_transfer_queue_family, device->vulkan_main_queue_family,
                                 QueueType::CopyTransfer, QueueType::Graphics );
