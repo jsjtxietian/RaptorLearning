@@ -498,6 +498,8 @@ struct SecondaryDrawTask : public enki::ITaskSet {
         // TODO(marco): loop by material so that we can deal with multiple passes
         cb->begin_secondary( parent->current_render_pass );
 
+        // the scissor and viewport must always be set at the beginning, as no state is inherited outside
+        // of the bound render pass and frame buffer.
         cb->set_scissor( nullptr );
         cb->set_viewport( nullptr );
 
@@ -568,6 +570,7 @@ struct ObjDrawTask : public enki::ITaskSet {
         gpu_commands->bind_pass( gpu->get_swapchain_pass(), use_secondary);
 
         if ( use_secondary ) {
+            // group multiple meshes per command buffer as an example
             static const u32 parallel_recordings = 4;
             u32 draws_per_secondary = scene->mesh_draws.size / parallel_recordings;
             u32 offset = draws_per_secondary * parallel_recordings;
@@ -615,7 +618,7 @@ struct ObjDrawTask : public enki::ITaskSet {
             for ( u32 secondary_index = 0; secondary_index < parallel_recordings; ++secondary_index ) {
                 SecondaryDrawTask& task = secondary_tasks[ secondary_index ];
                 task_scheduler->WaitforTask( &task );
-
+                // To copy the secondary command buffers into the primary one
                 vkCmdExecuteCommands( gpu_commands->vk_command_buffer, 1, &task.cb->vk_command_buffer );
             }
 

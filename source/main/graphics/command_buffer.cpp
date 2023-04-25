@@ -752,6 +752,8 @@ void CommandBuffer::upload_buffer_data( BufferHandle src_, BufferHandle dst_ ) {
 }
 
 // CommandBufferManager ///////////////////////////////////////////////////
+// allocate a maximum of five empty command buffers, two primary and three
+// secondary, so that more tasks can execute chunks of rendering in parallel.
 void CommandBufferManager::init( GpuDevice* gpu_, u32 num_threads ) {
 
     gpu = gpu_;
@@ -850,6 +852,7 @@ void CommandBufferManager::shutdown() {
     used_secondary_command_buffers.shutdown();
 }
 
+// reset corresponding CommandPool instead of manually freeing buffers
 void CommandBufferManager::reset_pools( u32 frame_index ) {
 
     for ( u32 i = 0; i < num_pools_per_frame; i++ ) {

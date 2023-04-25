@@ -80,7 +80,10 @@ struct CommandBuffer {
 
 }; // struct CommandBuffer
 
-
+// In Vulkan, any kind of pool needs to be externally synchronized by the user; thus, the best
+// option is to have an association between a thread and a pool.
+// The execution order of the command buffers is based on the order of the array submitted to the main
+// queue – thus, from a Vulkan perspective, sorting can be performed on a command buffer level.
 struct CommandBufferManager {
 
     void                    init( GpuDevice* gpu, u32 num_threads );
