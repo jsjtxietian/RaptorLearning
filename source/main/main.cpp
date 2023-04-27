@@ -2030,11 +2030,11 @@ int main( int argc, char** argv ) {
             ZoneScopedN("ImGui Recording");
 
             if ( ImGui::Begin( "Raptor ImGui" ) ) {
-                ImGui::InputFloat( "Model scale", &model_scale, 0.001f );
+                ImGui::SliderFloat,( "Model scale", &model_scale, 0.001f ,5.0f);
                 ImGui::SliderFloat3( "Light position", light.raw, -30.0f, 30.0f );
-                ImGui::InputFloat( "Light range", &light_range );
-                ImGui::InputFloat( "Light intensity", &light_intensity );
-                ImGui::InputFloat3( "Camera position", game_camera.camera.position.raw );
+                ImGui::SliderFloat( "Light range", &light_range,10.f, 50.0f );
+                ImGui::SliderFloat( "Light intensity", &light_intensity , 50.0f,100.0f );
+                ImGui::SliderFloat3( "Camera position", game_camera.camera.position.raw ,-10.0f, 10.0f );
                 ImGui::InputFloat3( "Camera target movement", game_camera.target_movement.raw );
                 ImGui::Separator();
                 ImGui::Checkbox( "Dynamically recreate descriptor sets", &recreate_per_thread_descriptors );
