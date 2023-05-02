@@ -200,10 +200,14 @@ static void compute_edges( FrameGraph* frame_graph, FrameGraphNode* node, u32 no
             continue;
         }
 
+        // save the details of the output in the input resource. 
+        // have direct access to this data in the input as well
+
         resource->producer = output_resource->producer;
         resource->resource_info = output_resource->resource_info;
         resource->output_handle = output_resource->output_handle;
-
+        
+        // create an edge between the node that produces this input and the node currently processing
         FrameGraphNode* parent_node = frame_graph->access_node( resource->producer );
 
         // rprint( "Adding edge from %s [%d] to %s [%d]\n", parent_node->name, resource->producer.index, node->name, node_index )
@@ -366,14 +370,16 @@ void FrameGraph::compile() {
     Array<FrameGraphNodeHandle> sorted_nodes;
     sorted_nodes.init( &local_allocator, nodes.size );
 
+    // mark which nodes we have already processed
     Array<u8> visited;
     visited.init( &local_allocator, nodes.size, nodes.size );
     memset( visited.data, 0, sizeof( bool ) * nodes.size );
 
+    // keep track of which nodes we still have to process
     Array<FrameGraphNodeHandle> stack;
     stack.init( &local_allocator, nodes.size );
 
-    // Topological sorting
+    // Topological sorting, DFS
     for ( u32 n = 0; n < nodes.size; ++n ) {
         FrameGraphNode* node = builder->access_node( nodes[ n ] );
         if ( !node->enabled ) {
@@ -385,12 +391,15 @@ void FrameGraph::compile() {
         while ( stack.size > 0 ) {
             FrameGraphNodeHandle node_handle = stack.back();
 
+            // If a node has already been visited and added to the list of sorted nodes,
+            // simply remove it from the stack and continue processing other nodes
             if (visited[ node_handle.index ] == 2) {
                 stack.pop();
 
                 continue;
             }
 
+            // processed all of its children, it can be added to the list of sorted nodes
             if ( visited[ node_handle.index ]  == 1) {
                 visited[ node_handle.index ] = 2; // added
 
@@ -401,6 +410,7 @@ void FrameGraph::compile() {
                 continue;
             }
 
+            // first get to a node
             visited[ node_handle.index ] = 1; // visited
 
             FrameGraphNode* node = builder->access_node( node_handle );
@@ -410,6 +420,8 @@ void FrameGraph::compile() {
                 continue;
             }
 
+            // if the node is connected to other nodes,
+            // add them to the stack for processing and then iterate again
             for ( u32 r = 0; r < node->edges.size; ++r ) {
                 FrameGraphNodeHandle child_handle = node->edges[ r ];
 
@@ -424,6 +436,7 @@ void FrameGraph::compile() {
 
     nodes.clear();
 
+    // add them to the graph nodes in reverse order
     for ( i32 i = sorted_nodes.size - 1; i >= 0; --i ) {
         nodes.push( sorted_nodes[ i ] );
     }
@@ -434,18 +447,21 @@ void FrameGraph::compile() {
 
     // NOTE(marco): allocations and deallocations are used for verification purposes only
     sizet resource_count = builder->resource_cache.resources.used_indices;
+    // track on which node a given resource was allocated
     Array<FrameGraphNodeHandle> allocations;
     allocations.init( &local_allocator, resource_count, resource_count );
     for ( u32 i = 0; i < resource_count; ++i) {
         allocations[ i ].index = k_invalid_index;
     }
 
+    // node at which a given resource can be deallocated
     Array<FrameGraphNodeHandle> deallocations;
     deallocations.init( &local_allocator, resource_count, resource_count );
     for ( u32 i = 0; i < resource_count; ++i) {
         deallocations[ i ].index = k_invalid_index;
     }
 
+    // contain the resources that have been freed and can be reused.
     Array<TextureHandle> free_list;
     free_list.init( &local_allocator, resource_count );
 
@@ -458,6 +474,7 @@ void FrameGraph::compile() {
             continue;
         }
 
+        // increase their reference count each time they are used as input
         for ( u32 j = 0; j < node->inputs.size; ++j ) {
             FrameGraphResource* input_resource = builder->access_resource( node->inputs[ j ] );
             FrameGraphResource* resource = builder->access_resource( input_resource->output_handle );
@@ -514,6 +531,7 @@ void FrameGraph::compile() {
 
             resource->ref_count--;
 
+            // this is the last node that uses the resource
             if ( !resource->resource_info.external && resource->ref_count == 0 ) {
                 RASSERT( deallocations[ resource_index ].index == k_invalid_index );
                 deallocations[ resource_index ] = nodes[ i ];
@@ -560,6 +578,7 @@ void FrameGraph::add_ui() {
 
 void FrameGraph::render( CommandBuffer* gpu_commands, RenderScene* render_scene )
 {
+    // executing each node and ensuring all the resources are in the correct state for use by that node
     for ( u32 n = 0; n < nodes.size; ++n ) {
         FrameGraphNode* node = builder->access_node( nodes[ n ] );
         if ( !node->enabled ) {
@@ -580,6 +599,8 @@ void FrameGraph::render( CommandBuffer* gpu_commands, RenderScene* render_scene 
             if ( resource->type == FrameGraphResourceType_Texture ) {
                 Texture* texture = gpu_commands->device->access_texture( resource->resource_info.texture.texture );
 
+                // transition that resource from an attachment layout (for use in a render pass) 
+                // to a shader stage layout (for use in a fragment shader).
                 util_add_image_barrier( gpu_commands->vk_command_buffer, texture->vk_image, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PIXEL_SHADER_RESOURCE, 0, 1, resource->resource_info.texture.format == VK_FORMAT_D32_SFLOAT );
             } else if ( resource->type == FrameGraphResourceType_Attachment ) {
                 Texture* texture = gpu_commands->device->access_texture( resource->resource_info.texture.texture );
@@ -616,8 +637,12 @@ void FrameGraph::render( CommandBuffer* gpu_commands, RenderScene* render_scene 
 
         gpu_commands->set_viewport( &viewport );
 
+        // allows each node to perform any operations that must happen outside a render pass
         node->graph_render_pass->pre_render( gpu_commands, render_scene );
 
+        // bind the render pass for this node
+        // call the render method of the rendering pass that we registered for this node 
+        // and end the loop by ending the render pass
         gpu_commands->bind_pass( node->render_pass, node->framebuffer, false );
 
         node->graph_render_pass->render( gpu_commands, render_scene );
