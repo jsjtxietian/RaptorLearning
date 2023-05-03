@@ -1,6 +1,12 @@
-add_executable(Chapter3
+add_executable(Chapter4
+    graphics/asynchronous_loader.cpp
+    graphics/asynchronous_loader.hpp
     graphics/command_buffer.cpp
     graphics/command_buffer.hpp
+    graphics/frame_graph.cpp
+    graphics/frame_graph.hpp
+    graphics/gltf_scene.cpp
+    graphics/gltf_scene.hpp
     graphics/gpu_device.cpp
     graphics/gpu_device.hpp
     graphics/gpu_enum.hpp
@@ -8,8 +14,16 @@ add_executable(Chapter3
     graphics/gpu_profiler.hpp
     graphics/gpu_resources.cpp
     graphics/gpu_resources.hpp
+    graphics/obj_scene.cpp
+    graphics/obj_scene.hpp
+    graphics/render_resources_loader.cpp
+    graphics/render_resources_loader.hpp
+    graphics/render_scene.cpp
+    graphics/render_scene.hpp
     graphics/renderer.cpp
     graphics/renderer.hpp
+    graphics/scene_graph.cpp
+    graphics/scene_graph.hpp
     graphics/spirv_parser.cpp
     graphics/spirv_parser.hpp
 
@@ -19,26 +33,27 @@ add_executable(Chapter3
     main.cpp
 )
 
-set_property(TARGET Chapter3 PROPERTY CXX_STANDARD 17)
+set_property(TARGET Chapter4 PROPERTY CXX_STANDARD 17)
 
 if (WIN32)
-    target_compile_definitions(Chapter3 PRIVATE
+    target_compile_definitions(Chapter4 PRIVATE
         _CRT_SECURE_NO_WARNINGS
         WIN32_LEAN_AND_MEAN
         NOMINMAX)
 endif()
 
-target_compile_definitions(Chapter3 PRIVATE
+target_compile_definitions(Chapter4 PRIVATE
+    RAPTOR_WORKING_FOLDER="${CMAKE_CURRENT_SOURCE_DIR}"
     RAPTOR_SHADER_FOLDER="${CMAKE_CURRENT_SOURCE_DIR}/shaders/"
 )
 
-target_compile_definitions(Chapter3 PRIVATE
+target_compile_definitions(Chapter4 PRIVATE
     TRACY_ENABLE
     TRACY_ON_DEMAND
     TRACY_NO_SYSTEM_TRACING
 )
 
-target_include_directories(Chapter3 PRIVATE
+target_include_directories(Chapter4 PRIVATE
     .
     ..
     ../raptor
@@ -47,41 +62,40 @@ target_include_directories(Chapter3 PRIVATE
 )
 
 if (WIN32)
-    target_include_directories(Chapter3 PRIVATE
+    target_include_directories(Chapter4 PRIVATE
         ../../binaries/SDL2-2.0.18/include)
 
-    target_link_directories(Chapter3 PRIVATE
+        target_link_directories(Chapter4 PRIVATE
         ../../binaries/SDL2-2.0.18/lib/x64
         ../../binaries/assimp/windows/bin
         ../../binaries/assimp/windows/lib
     )
 else()
-    target_link_directories(Chapter3 PRIVATE
-        ../../binaries/assimp/linux/lib
-    )
+    target_link_directories(Chapter4 PRIVATE
+        ../../binaries/assimp/linux/lib)
 
-    target_include_directories(Chapter3 PRIVATE
+    target_include_directories(Chapter4 PRIVATE
         ${SDL2_INCLUDE_DIRS})
 endif()
 
-target_link_libraries(Chapter3 PRIVATE
-    RaptorFoundation
-    RaptorExternal
-    RaptorApp
-    ${Vulkan_LIBRARIES}
-)
-
 if (WIN32)
-    target_link_libraries(Chapter3 PRIVATE
+    target_link_libraries(Chapter4 PRIVATE
         assimp-vc142-mt
         SDL2)
 else()
-    target_link_libraries(Chapter3 PRIVATE
+    target_link_libraries(Chapter4 PRIVATE
         dl
         pthread
         assimp
         SDL2::SDL2)
 endif()
+
+target_link_libraries(Chapter4 PRIVATE
+    RaptorFoundation
+    RaptorExternal
+    RaptorApp
+    ${Vulkan_LIBRARIES}
+)
 
 if (WIN32)
     set(DLLS_TO_COPY
@@ -90,28 +104,9 @@ if (WIN32)
     )
 
     foreach(DLL ${DLLS_TO_COPY})
-        add_custom_command(TARGET Chapter3 POST_BUILD
+        add_custom_command(TARGET Chapter4 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy ${DLL} "$(OutDir)"
             VERBATIM
         )
     endforeach()
 endif()
-
-file(GLOB GLSL_SHADERS
-    shaders/*.vert
-    shaders/*.frag)
-
-add_custom_target(Chapter3SpvShaders
-    SOURCES ${GLSL_SHADERS}
-)
-
-foreach (GLSL_SHADER ${GLSL_SHADERS})
-    add_custom_command(TARGET Chapter3SpvShaders
-        COMMAND $ENV{VULKAN_SDK}/bin/glslc ${GLSL_SHADER}
-        DEPENDS ${GLSL_SHADER}
-    )
-endforeach()
-
-add_dependencies(Chapter3
-    Chapter3SpvShaders
-)

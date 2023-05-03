@@ -8,7 +8,8 @@
 namespace raptor {
 namespace spirv {
 
-static const u32        k_bindless_texture_binding = 10;
+static const u32        k_bindless_set_index        = 0;
+static const u32        k_bindless_texture_binding  = 10;
 
 struct Member
 {
@@ -41,6 +42,8 @@ struct Id
     // For structs
     StringView      name;
     Array<Member>   members;
+
+    bool            structured_buffer;
 };
 
 VkShaderStageFlags parse_execution_model( SpvExecutionModel model )
@@ -59,6 +62,7 @@ VkShaderStageFlags parse_execution_model( SpvExecutionModel model )
         {
             return VK_SHADER_STAGE_FRAGMENT_BIT;
         }
+        case ( SpvExecutionModelGLCompute ):
         case ( SpvExecutionModelKernel ):
         {
             return VK_SHADER_STAGE_COMPUTE_BIT;
@@ -68,8 +72,22 @@ VkShaderStageFlags parse_execution_model( SpvExecutionModel model )
     return 0;
 }
 
+static void add_binding_if_unique( DescriptorSetLayoutCreation& creation, DescriptorSetLayoutCreation::Binding& binding ) {
+    bool found = false;
+    for ( u32 i = 0; i < creation.num_bindings; ++i ) {
+        const DescriptorSetLayoutCreation::Binding& b = creation.bindings[ i ];
+        if ( b.type == binding.type && b.index == binding.index ) {
+            found = true;
+            break;
+        }
+    }
+
+    if ( !found ) {
+        creation.add_binding( binding );
+    }
+}
+
 void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer, ParseResult* parse_result ) {
-    // make sure that we are reading valid SPIR-V data
     RASSERT( ( data_size % 4 ) == 0 );
     u32 spv_word_count = safe_cast<u32>( data_size / 4 );
 
@@ -88,7 +106,6 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
 
     size_t word_index = 5;
     while ( word_index < spv_word_count ) {
-        // Each ID definition starts with the Op type and the number of words that it is composed of:
         SpvOp op = ( SpvOp )( data[ word_index ] & 0xFF );
         u16 word_count = ( u16 )( data[ word_index ] >> 16 );
 
@@ -99,13 +116,33 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
                 RASSERT( word_count >= 4 );
 
                 SpvExecutionModel model = ( SpvExecutionModel )data[ word_index + 1 ];
-                // translate it into a VkShaderStageFlags value
+
                 stage = parse_execution_model( model );
                 RASSERT( stage != 0 );
 
                 break;
             }
-            // parse the descriptor set index and binding:
+
+            case ( SpvOpExecutionMode ):
+            {
+                RASSERT( word_count >= 3 );
+
+                SpvExecutionMode mode = ( SpvExecutionMode )data[ word_index + 2 ];
+
+                switch ( mode )
+                {
+                    case SpvExecutionModeLocalSize:
+                    {
+                        parse_result->compute_local_size.x = data[ word_index + 3 ];
+                        parse_result->compute_local_size.y = data[ word_index + 4 ];
+                        parse_result->compute_local_size.z = data[ word_index + 5 ];
+                        break;
+                    }
+                }
+
+                break;
+            }
+
             case ( SpvOpDecorate ):
             {
                 RASSERT( word_count >= 3 );
@@ -113,7 +150,7 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
                 u32 id_index = data[ word_index + 1 ];
                 RASSERT( id_index < id_bound );
 
-                Id& id= ids[ id_index ];
+                Id& id = ids[ id_index ];
 
                 SpvDecoration decoration = ( SpvDecoration )data[ word_index + 2 ];
                 switch ( decoration )
@@ -124,10 +161,20 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
                         break;
                     }
 
-                    // descriptor set index
                     case ( SpvDecorationDescriptorSet ):
                     {
                         id.set = data[ word_index + 3 ];
+                        break;
+                    }
+
+                    case ( SpvDecorationBlock ):
+                    {
+                        id.structured_buffer = false;
+                        break;
+                    }
+                    case ( SpvDecorationBufferBlock ):
+                    {
+                        id.structured_buffer = true;
                         break;
                     }
                 }
@@ -270,8 +317,13 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
 
             case ( SpvOpTypeImage ):
             {
-                // NOTE(marco): not sure we need this information just yet
                 RASSERT( word_count >= 9 );
+
+                u32 id_index = data[ word_index + 1 ];
+                RASSERT( id_index < id_bound );
+
+                Id& id = ids[ id_index ];
+                id.op = op;
 
                 break;
             }
@@ -397,38 +449,45 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
 
         word_index += word_count;
     }
-
-    // loop over each ID entry and identify the ones we are interested in
+    
+    //
     for ( u32 id_index = 0; id_index < ids.size; ++id_index ) {
-        Id& id= ids[ id_index ];
+        Id& id = ids[ id_index ];
 
         if ( id.op == SpvOpVariable ) {
             switch ( id.storage_class ) {
+                case SpvStorageClassStorageBuffer:
+                {
+                    //rprint( "Storage!\n" );
+                    break;
+                }
+                case SpvStorageClassImage:
+                {
+                    //rprint( "Image!\n" );
+                    break;
+                }
                 case ( SpvStorageClassUniform ):
                 case ( SpvStorageClassUniformConstant ):
                 {
-                    if ( id.set == 1 && ( id.binding == k_bindless_texture_binding || id.binding == ( k_bindless_texture_binding + 1 ) ) ) {
+                    if ( id.set == k_bindless_set_index && ( id.binding == k_bindless_texture_binding || id.binding == ( k_bindless_texture_binding + 1 ) ) ) {
                         // NOTE(marco): these are managed by the GPU device
                         continue;
                     }
 
                     // NOTE(marco): get actual type
-                    // double indirection to retrieve the actual type of a variable: 
-                    // first, get the pointer type, and from the pointer type
-                    // then, get to the real type of the variable
                     Id& uniform_type = ids[ ids[ id.type_index ].type_index ];
 
                     DescriptorSetLayoutCreation& setLayout = parse_result->sets[ id.set ];
                     setLayout.set_set_index( id.set );
 
                     DescriptorSetLayoutCreation::Binding binding{ };
-                    binding.start = id.binding;
+                    binding.index = id.binding;
                     binding.count = 1;
 
                     switch ( uniform_type.op ) {
                         case (SpvOpTypeStruct):
                         {
-                            binding.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                            binding.type = uniform_type.structured_buffer ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                             binding.name = uniform_type.name.text;
                             break;
                         }
@@ -439,9 +498,23 @@ void parse_binary( const u32* data, size_t data_size, StringBuffer& name_buffer,
                             binding.name = id.name.text;
                             break;
                         }
+
+                        case SpvOpTypeImage:
+                        {
+                            binding.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                            binding.name = id.name.text;
+                            break;
+                        }
+
+                        default:
+                        {
+                            rprint( "Error reading op %u %s\n", uniform_type.op, uniform_type.name.text );
+                            break;
+                        }
                     }
 
-                    setLayout.add_binding_at_index( binding, id.binding );
+                    //rprint( "Adding binding %u %s, set %u. Total %u\n", binding.index, binding.name, id.set, setLayout.num_bindings );
+                    add_binding_if_unique( setLayout, binding );
 
                     parse_result->set_count = max( parse_result->set_count, ( id.set + 1 ) );
 
