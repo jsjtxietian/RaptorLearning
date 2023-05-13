@@ -21,7 +21,6 @@ void main() {
 	float color10 = texelFetch( src, texel_position10, 0 ).r;
 	float color11 = texelFetch( src, texel_position11, 0 ).r;
 
-	// depth goes from 0 (close to the camera) to 1 (far from the camera)
 	float result = max( max( max( color00, color01 ), color10 ), color11 );
 
 	imageStore( dst, ivec2( gl_GlobalInvocationID.xy ), vec4( result, 0, 0, 0 ) );
