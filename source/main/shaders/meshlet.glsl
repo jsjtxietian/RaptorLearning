@@ -75,18 +75,13 @@ void main()
     // TODO: meshlet_draw_commands does not have notion of offset!
     // gl_drawIDARB will be 0...5 for two subsequent calls, thus we need a mechanism
     // to differentiate between calls, or we call everything in one batch.
-
-    // extrapolate the light index and the read offset in the meshlet instances written in the culling compute shader
     uint packed_light_index_face_index = meshlet_draw_commands[command_read_offset + gl_DrawIDARB].w;
     const uint meshlet_index = meshlet_group_index * 32 + task_index;
     const uint light_index = packed_light_index_face_index >> 16;
     const uint meshlet_index_read_offset = light_index * 45000;
-
-    // read the correct meshlet and mesh instance indices
     uint global_meshlet_index = meshlet_instances[meshlet_index_read_offset + meshlet_index].y;
     uint mesh_instance_index = meshlet_instances[meshlet_index_read_offset + meshlet_index].x;
 
-    // calculate the face index, and start the culling phase:
     const uint face_index = (packed_light_index_face_index & 0xf);
 #else
     uint meshlet_group_index = gl_WorkGroupID.x;
@@ -114,7 +109,7 @@ void main()
 #if defined(TASK_DEPTH_CUBEMAP) || defined(TASK_DEPTH_TETRAHEDRON)
 
     const vec4 camera_sphere = camera_spheres[light_index];
-    
+
     // Cone cull
     accept = !coneCull(world_center.xyz, radius, cone_axis, cone_cutoff, camera_sphere.xyz) || disable_shadow_meshlets_cone_cull();
 
@@ -556,8 +551,6 @@ void main()
         writePackedPrimitiveIndices4x8NV(i * 4, meshletData[indexOffset + i]);
     }
 
-// write the layer index for each primitive. 
-// The usage of these offsets is to avoid bank conflict when writing
 #if defined(MESH_DEPTH_CUBEMAP) || defined(MESH_DEPTH_TETRAHEDRON)
     gl_MeshPrimitivesNV[task_index].gl_Layer = layer_index;
     gl_MeshPrimitivesNV[task_index + 32].gl_Layer = layer_index;
@@ -1342,8 +1335,6 @@ void main() {
 
     global_shader_barrier();
 
-    // skip threads that will work on out-of-bounds lights. When dispatch, round up the
-    // numbers after dividing by 32, so some threads can be working on empty lights
     uint light_index = gl_GlobalInvocationID.x % active_lights;
     if (light_index >= active_lights) {
         return;
@@ -1403,7 +1394,7 @@ void main() {
         // Artificially inflate bounding sphere.
         float meshlet_radius = meshlets[meshlet_index].radius * scale * 1.1;
 
-        //if (sphere_intersect(meshlet_world_center.xyz, meshlet_radius, light.world_position, light.radius)) 
+        //if (sphere_intersect(meshlet_world_center.xyz, meshlet_radius, light.world_position, light.radius))
         {
             //per_light_meshlet_instances[light_index] = uint((light_index & 0xffff) | ((m << 16) & 0xffff));
             //uint per_light_offset = atomicAdd(per_light_meshlet_instances[light_index], 1);
@@ -1462,7 +1453,7 @@ mat4 cubemap_projection( float near_z, float far_z ) {
     // mat[0][0] is f / aspect = 1.0 / 1.0
     // mat[1][1] is f = 1.0
     const float fn = 1.0 / (near_z - far_z);
-    return mat4(1.0, 0.0, 0.0, 0.0, 
+    return mat4(1.0, 0.0, 0.0, 0.0,
                 0.0, 1.0, 0.0, 0.0,
                 0.0, 0.0, -far_z * fn, 1.0,
                 0.0, 0.0, near_z * far_z * fn, 0.0 );
@@ -1474,7 +1465,7 @@ void main() {
 
     if (gl_GlobalInvocationID.x == 0 ) {
 
-        // Use this as atomic int 
+        // Use this as atomic int
         per_light_meshlet_instances[NUM_LIGHTS] = 0;
     }
 
@@ -1495,7 +1486,6 @@ void main() {
     if (visible_meshlets > 0) {
         const uint command_offset = atomicAdd(per_light_meshlet_instances[NUM_LIGHTS], 6);
         uint packed_light_index = (light_index & 0xffff) << 16;
-        // one for each cubemap face
         meshlet_draw_commands[command_offset] = uvec4( ((visible_meshlets + 31) / 32), 1, 1, packed_light_index | 0 );
         meshlet_draw_commands[command_offset + 1] = uvec4( ((visible_meshlets + 31) / 32), 1, 1, packed_light_index | 1 );
         meshlet_draw_commands[command_offset + 2] = uvec4( ((visible_meshlets + 31) / 32), 1, 1, packed_light_index | 2 );

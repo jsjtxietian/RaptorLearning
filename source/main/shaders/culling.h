@@ -85,10 +85,6 @@ bool occlusion_cull( vec3 view_bounding_center, float radius, float z_near, floa
 	return occlusion_visible;
 }
 
-// using cubemap face normals to calculate whether the center and extents 
-// are enclosed in the four planes used to define one of the six cubemap faces
-// return a bitmask with each of the six bits set as 1 when the current axis-aligned
-// bounding box is visible in that face
 uint get_cube_face_mask( vec3 cube_map_pos, vec3 aabb_min, vec3 aabb_max ) {
 
     vec3 plane_normals[] = { vec3(-1, 1, 0), vec3(1, 1, 0), vec3(1, 0, 1), vec3(1, 0, -1), vec3(0, 1, 1), vec3(0, -1, 1) };

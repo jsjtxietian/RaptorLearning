@@ -90,7 +90,7 @@ struct ResourceTracker {
             auto kv = resources_to_names.get_structure( it );
             ResourceUpdateType::Enum type = ( ResourceUpdateType::Enum )( kv.key >> 28 );
             u32 index = kv.key & 0xfffffff;
-            rprint( "Leaking %s id %u\n", ResourceUpdateType::ToString(type), index );
+            rprint( "Leaking %s id %u\n", ResourceUpdateType::ToString( type ), index );
             resources_to_names.iterator_advance( it );
         }
 
@@ -128,7 +128,7 @@ struct ResourceTracker {
     u32                             tracked_resource_index = k_invalid_index;
     bool                            track_resource = false;             // Global runtime switch for printing resources
     bool                            track_all_indices_per_type = false; // Set to true to print all resources of a type
-                                                                        // instead of a single index.
+    // instead of a single index.
 }; // struct ResourceTracker
 
 #else
@@ -240,6 +240,32 @@ static const u32        k_bindless_texture_binding = 10;
 static const u32        k_bindless_image_binding = 11;
 static const u32        k_max_bindless_resources = 1024;
 
+bool GpuDevice::get_family_queue( VkPhysicalDevice physical_device ) {
+    u32 queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, nullptr );
+
+    VkQueueFamilyProperties* queue_families = ( VkQueueFamilyProperties* )ralloca( sizeof( VkQueueFamilyProperties ) * queue_family_count, allocator );
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families );
+
+    u32 family_index = 0;
+    VkBool32 surface_supported;
+    for ( ; family_index < queue_family_count; ++family_index ) {
+        VkQueueFamilyProperties queue_family = queue_families[ family_index ];
+        if ( queue_family.queueCount > 0 && queue_family.queueFlags & ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT ) ) {
+            vkGetPhysicalDeviceSurfaceSupportKHR( physical_device, family_index, vulkan_window_surface, &surface_supported);
+
+            if ( surface_supported ) {
+                vulkan_main_queue_family = family_index;
+                break;
+            }
+        }
+    }
+
+    rfree( queue_families, allocator );
+
+    return surface_supported;
+}
+
 void GpuDevice::init( const GpuDeviceCreation& creation ) {
 
     rprint( "Gpu Device init\n" );
@@ -324,6 +350,15 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     result = vkEnumeratePhysicalDevices( vulkan_instance, &num_physical_device, gpus );
     check( result );
 
+    //////// Create drawable surface
+    // Create surface
+    SDL_Window* window = ( SDL_Window* )creation.window;
+    if ( SDL_Vulkan_CreateSurface( window, vulkan_instance, &vulkan_window_surface ) == SDL_FALSE ) {
+        rprint( "Failed to create Vulkan surface.\n" );
+    }
+
+    sdl_window = window;
+
     VkPhysicalDevice discrete_gpu = VK_NULL_HANDLE;
     VkPhysicalDevice integrated_gpu = VK_NULL_HANDLE;
     for ( u32 i = 0; i < num_physical_device; ++i ) {
@@ -331,12 +366,21 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         vkGetPhysicalDeviceProperties( physical_device, &vulkan_physical_properties );
 
         if ( vulkan_physical_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ) {
-            discrete_gpu = physical_device;
+            if ( get_family_queue( physical_device ) ) {
+                // NOTE(marco): prefer discrete GPU over integrated one, stop at first discrete GPU that has
+                // present capabilities
+                discrete_gpu = physical_device;
+                break;
+            }
+
             continue;
         }
 
         if ( vulkan_physical_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ) {
-            integrated_gpu = physical_device;
+            if ( get_family_queue( physical_device ) ) {
+                integrated_gpu = physical_device;
+            }
+
             continue;
         }
     }
@@ -385,6 +429,11 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
                 multiview_extension_present = true;
                 continue;
             }
+
+            if ( !strcmp( extensions[ i ].extensionName, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME ) ) {
+                fragment_shading_rate_present = true;
+                continue;
+            }
         }
 
         temp_allocator->free_marker( initial_temp_allocator_marker );
@@ -401,9 +450,18 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     VkPhysicalDeviceProperties2 physical_device_properties_2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
     physical_device_properties_2.pNext = &subgroup_properties;
 
+    VkPhysicalDeviceFragmentShadingRatePropertiesKHR fragment_shading_rate_properties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR };
+    if ( fragment_shading_rate_present ) {
+        subgroup_properties.pNext = &fragment_shading_rate_properties;
+    }
+
     vkGetPhysicalDeviceProperties2( vulkan_physical_device, &physical_device_properties_2 );
 
     subgroup_size = subgroup_properties.subgroupSize;
+
+    if ( fragment_shading_rate_present ) {
+        min_fragment_shading_rate_texel_size = fragment_shading_rate_properties.minFragmentShadingRateAttachmentTexelSize;
+    }
 
     ubo_alignment = vulkan_physical_properties.limits.minUniformBufferOffsetAlignment;
     ssbo_alignemnt = vulkan_physical_properties.limits.minStorageBufferOffsetAlignment;
@@ -497,6 +555,12 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         device_extensions.push( VK_KHR_MULTIVIEW_EXTENSION_NAME );
     }
 
+    if ( fragment_shading_rate_present ) {
+        device_extensions.push( VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME );
+        device_extensions.push( VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME );
+        device_extensions.push( VK_KHR_MAINTENANCE2_EXTENSION_NAME );
+    }
+
     const float queue_priority[] = { 1.0f, 1.0f };
     VkDeviceQueueCreateInfo queue_info[ 3 ] = {};
 
@@ -554,6 +618,15 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         current_pnext = &mesh_shaders_features;
     }
 
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR shading_rate_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR };
+    if ( fragment_shading_rate_present ) {
+        shading_rate_features.attachmentFragmentShadingRate = true;
+        shading_rate_features.pipelineFragmentShadingRate = true;
+
+        shading_rate_features.pNext = current_pnext;
+        current_pnext = &shading_rate_features;
+    }
+
     physical_features2.pNext = current_pnext;
     vkGetPhysicalDeviceFeatures2( vulkan_physical_device, &physical_features2 );
 
@@ -582,19 +655,36 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     }
 
     if ( dynamic_rendering_extension_present ) {
-        cmd_begin_rendering = ( PFN_vkCmdBeginRenderingKHR )vkGetDeviceProcAddr( vulkan_device, "vkCmdBeginRenderingKHR" );
-        cmd_end_rendering   = (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr( vulkan_device, "vkCmdEndRenderingKHR" );
+        vkCmdBeginRenderingKHR = ( PFN_vkCmdBeginRenderingKHR )vkGetDeviceProcAddr( vulkan_device, "vkCmdBeginRenderingKHR" );
+        vkCmdEndRenderingKHR   = (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr( vulkan_device, "vkCmdEndRenderingKHR" );
     }
 
     if ( synchronization2_extension_present ) {
-        queue_submit2 = ( PFN_vkQueueSubmit2KHR )vkGetDeviceProcAddr( vulkan_device, "vkQueueSubmit2KHR" );
-        cmd_pipeline_barrier2 = ( PFN_vkCmdPipelineBarrier2KHR )vkGetDeviceProcAddr( vulkan_device, "vkCmdPipelineBarrier2KHR" );
+        vkQueueSubmit2KHR = ( PFN_vkQueueSubmit2KHR )vkGetDeviceProcAddr( vulkan_device, "vkQueueSubmit2KHR" );
+        vkCmdPipelineBarrier2KHR = ( PFN_vkCmdPipelineBarrier2KHR )vkGetDeviceProcAddr( vulkan_device, "vkCmdPipelineBarrier2KHR" );
     }
 
     if ( mesh_shaders_extension_present ) {
-        cmd_draw_mesh_tasks = (PFN_vkCmdDrawMeshTasksNV)vkGetDeviceProcAddr( vulkan_device, "vkCmdDrawMeshTasksNV" );
-        cmd_draw_mesh_tasks_indirect = (PFN_vkCmdDrawMeshTasksIndirectNV)vkGetDeviceProcAddr( vulkan_device, "vkCmdDrawMeshTasksIndirectNV" );
-        cmd_draw_mesh_tasks_indirect_count = ( PFN_vkCmdDrawMeshTasksIndirectCountNV )vkGetDeviceProcAddr( vulkan_device, "vkCmdDrawMeshTasksIndirectCountNV" );
+        vkCmdDrawMeshTasksNV = (PFN_vkCmdDrawMeshTasksNV)vkGetDeviceProcAddr( vulkan_device, "vkCmdDrawMeshTasksNV" );
+        vkCmdDrawMeshTasksIndirectNV = (PFN_vkCmdDrawMeshTasksIndirectNV)vkGetDeviceProcAddr( vulkan_device, "vkCmdDrawMeshTasksIndirectNV" );
+        vkCmdDrawMeshTasksIndirectCountNV = ( PFN_vkCmdDrawMeshTasksIndirectCountNV )vkGetDeviceProcAddr( vulkan_device, "vkCmdDrawMeshTasksIndirectCountNV" );
+    }
+
+    if ( fragment_shading_rate_present ) {
+        vkGetPhysicalDeviceFragmentShadingRatesKHR = ( PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR)vkGetInstanceProcAddr( vulkan_instance, "vkGetPhysicalDeviceFragmentShadingRatesKHR" );
+        vkCmdSetFragmentShadingRateKHR = ( PFN_vkCmdSetFragmentShadingRateKHR )vkGetDeviceProcAddr( vulkan_device, "vkCmdSetFragmentShadingRateKHR" );
+
+        u32 shading_rates_count = 0;
+        vkGetPhysicalDeviceFragmentShadingRatesKHR( vulkan_physical_device, &shading_rates_count, nullptr );
+
+        fragment_shading_rates.init( allocator, shading_rates_count, shading_rates_count );
+        memset( fragment_shading_rates.data, 0, sizeof( VkPhysicalDeviceFragmentShadingRateKHR ) * shading_rates_count );
+
+        for ( u32 fsr_index = 0; fsr_index < shading_rates_count; ++fsr_index ) {
+            fragment_shading_rates[ fsr_index ].sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_KHR;
+        }
+
+        vkGetPhysicalDeviceFragmentShadingRatesKHR( vulkan_physical_device, &shading_rates_count, fragment_shading_rates.data );
     }
 
     // Get main queue
@@ -607,15 +697,6 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     if ( vulkan_transfer_queue_family < queue_family_count ) {
         vkGetDeviceQueue( vulkan_device, transfer_queue_family_index, 0, &vulkan_transfer_queue );
     }
-
-    //////// Create drawable surface
-    // Create surface
-    SDL_Window* window = ( SDL_Window* )creation.window;
-    if ( SDL_Vulkan_CreateSurface( window, vulkan_instance, &vulkan_window_surface ) == SDL_FALSE ) {
-        rprint( "Failed to create Vulkan surface.\n" );
-    }
-
-    sdl_window = window;
 
     // Create Framebuffers
     int window_width, window_height;
@@ -832,9 +913,9 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
 #if defined (RAPTOR_GPU_DEVICE_RESOURCE_TRACKING)
     resource_tracker.init( allocator );
     resource_tracker.tracked_resource_type = ResourceUpdateType::Texture;
-    resource_tracker.tracked_resource_index = 45;
+    resource_tracker.tracked_resource_index = 23;
     resource_tracker.track_resource = false;
-    resource_tracker.track_all_indices_per_type = false;
+    resource_tracker.track_all_indices_per_type = true;
 #endif // RAPTOR_GPU_DEVICE_RESOURCE_TRACKING
 
     //////// Create swapchain
@@ -1099,6 +1180,8 @@ void GpuDevice::shutdown() {
 
     string_buffer.shutdown();
 
+    fragment_shading_rates.shutdown();
+
     rprint( "Gpu Device shutdown\n" );
 }
 
@@ -1132,11 +1215,14 @@ static void vulkan_create_texture_view( GpuDevice& gpu, const TextureViewCreatio
 static VkImageUsageFlags vulkan_get_image_usage( const TextureCreation& creation ) {
     const bool is_render_target = ( creation.flags & TextureFlags::RenderTarget_mask ) == TextureFlags::RenderTarget_mask;
     const bool is_compute_used = ( creation.flags & TextureFlags::Compute_mask ) == TextureFlags::Compute_mask;
+    const bool is_shading_rate_texture = ( creation.flags & TextureFlags::ShadingRate_mask ) == TextureFlags::ShadingRate_mask;
 
     // Default to always readable from shader.
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
 
     usage |= is_compute_used ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
+
+    usage |= is_shading_rate_texture ? VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR : 0;
 
     if ( TextureFormat::has_depth_or_stencil( creation.format ) ) {
         // Depth/Stencil textures are normally textures you render into.
@@ -1335,7 +1421,7 @@ static void upload_texture_data( Texture* texture, void* upload_data, GpuDevice&
         submit_info.commandBufferInfoCount = 1;
         submit_info.pCommandBufferInfos = &command_buffer_info;
 
-        gpu.queue_submit2( gpu.vulkan_main_queue, 1, &submit_info, VK_NULL_HANDLE );
+        gpu.vkQueueSubmit2KHR( gpu.vulkan_main_queue, 1, &submit_info, VK_NULL_HANDLE );
     } else {
         VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.commandBufferCount = 1;
@@ -1545,7 +1631,6 @@ ShaderStateHandle GpuDevice::create_shader_state( const ShaderStateCreation& cre
         }
 
         VkShaderModuleCreateInfo shader_create_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-        bool compiled = false;
 
         if ( creation.spv_input ) {
             shader_create_info.codeSize = stage.code_size;
@@ -1554,19 +1639,62 @@ ShaderStateHandle GpuDevice::create_shader_state( const ShaderStateCreation& cre
             shader_create_info = compile_shader( stage.code, stage.code_size, stage.type, creation.name );
         }
 
-        // Compile shader module
-        VkPipelineShaderStageCreateInfo& shader_stage_info = shader_state->shader_stage_info[ compiled_shaders ];
-        memset( &shader_stage_info, 0, sizeof( VkPipelineShaderStageCreateInfo ) );
-        shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shader_stage_info.pName = "main";
-        shader_stage_info.stage = stage.type;
+        // Spir-V file is not generated when there is a compilation error, we can use this to know when compilation is succeded.
+        if ( shader_create_info.pCode ) {
+            // Parse the generated Spir-V to obtain specialization constants informations.
+            spirv::parse_binary( shader_create_info.pCode, shader_create_info.codeSize, name_buffer, shader_state->parse_result );
 
-        if ( vkCreateShaderModule( vulkan_device, &shader_create_info, nullptr, &shader_state->shader_stage_info[ compiled_shaders ].module ) != VK_SUCCESS ) {
+            // Compile shader module
+            VkPipelineShaderStageCreateInfo& shader_stage_info = shader_state->shader_stage_info[ compiled_shaders ];
+            memset( &shader_stage_info, 0, sizeof( VkPipelineShaderStageCreateInfo ) );
+            shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            shader_stage_info.pName = "main";
+            shader_stage_info.stage = stage.type;
+
+            // NOTE: this needs to be static because pipeline reference it.
+            static VkSpecializationInfo specialization_info;
+            static VkSpecializationMapEntry specialization_entries[ spirv::k_max_specialization_constants ];
+            static u32 specialization_data[ spirv::k_max_specialization_constants ];
+
+            // Add optional specialization constants.
+            if ( shader_state->parse_result->specialization_constants_count ) {
+
+                specialization_info.mapEntryCount = shader_state->parse_result->specialization_constants_count;
+                // NOTE: we assume specialization constants to either be i32,u32 or floats.
+                specialization_info.dataSize = shader_state->parse_result->specialization_constants_count * sizeof( u32 );
+                specialization_info.pMapEntries = specialization_entries;
+                specialization_info.pData = specialization_data;
+
+                for ( u32 i = 0; i < shader_state->parse_result->specialization_constants_count; ++i ) {
+
+                    const spirv::SpecializationConstant& specialization_constant = shader_state->parse_result->specialization_constants[ i ];
+                    cstring specialization_name = shader_state->parse_result->specialization_names[ i ].name;
+                    VkSpecializationMapEntry& specialization_entry = specialization_entries[ i ];
+
+                    // the driver and compiler will override the existing value in the shader
+                    // with the one we specified
+                    if ( strcmp( specialization_name, "SUBGROUP_SIZE" ) == 0 ) {
+                        specialization_entry.constantID = specialization_constant.binding;
+                        specialization_entry.size = sizeof( u32 );
+                        specialization_entry.offset = i * sizeof( u32 );
+
+                        specialization_data[ i ] = subgroup_size;
+                    }
+                }
+
+                shader_stage_info.pSpecializationInfo = &specialization_info;
+            }
+
+            if ( vkCreateShaderModule( vulkan_device, &shader_create_info, nullptr, &shader_state->shader_stage_info[ compiled_shaders ].module ) != VK_SUCCESS ) {
+                broken_stage = compiled_shaders;
+            }
+        } else {
             broken_stage = compiled_shaders;
-            break;
         }
 
-        spirv::parse_binary( shader_create_info.pCode, shader_create_info.codeSize, name_buffer, shader_state->parse_result );
+        if ( broken_stage != u32_max ) {
+            break;
+        }
 
         set_resource_name( VK_OBJECT_TYPE_SHADER_MODULE, ( u64 )shader_state->shader_stage_info[ compiled_shaders ].module, creation.name );
     }
@@ -1708,6 +1836,8 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
     // Create full pipeline
     if ( shader_state_data->graphics_pipeline ) {
         VkGraphicsPipelineCreateInfo pipeline_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+
+        pipeline_info.flags = creation.flags;
 
         //// Shader stage
         pipeline_info.pStages = shader_state_data->shader_stage_info;
@@ -1884,9 +2014,18 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
         }
 
         //// Dynamic states
-        VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
         VkPipelineDynamicStateCreateInfo dynamic_state{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
-        dynamic_state.dynamicStateCount = ArraySize( dynamic_states );
+
+        VkDynamicState dynamic_states[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+
+        if ( fragment_shading_rate_present ) {
+            dynamic_states[ 2 ] = VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR;
+            dynamic_state.dynamicStateCount = ArraySize( dynamic_states );
+        }
+        else {
+            dynamic_state.dynamicStateCount = 2;
+        }
+
         dynamic_state.pDynamicStates = dynamic_states;
 
         pipeline_info.pDynamicState = &dynamic_state;
@@ -2604,6 +2743,9 @@ RenderPassHandle GpuDevice::create_render_pass( const RenderPassCreation& creati
     //render_pass->vk_render_pass = vulkan_create_render_pass( *this, render_pass->output, creation.name );
 
     if ( !dynamic_rendering_extension_present ) {
+        // TODO(marco): create new version that uses VkCreateRenderPass2 if available to support fragment shading rate
+        assert( creation.shading_rate_image_index == k_invalid_index );
+
         render_pass->vk_render_pass = get_vulkan_render_pass( render_pass->output, creation.name );
     }
 
@@ -2627,6 +2769,7 @@ FramebufferHandle GpuDevice::create_framebuffer( const FramebufferCreation& crea
         framebuffer->color_attachments[ a ] = creation.output_textures[ a ];
     }
     framebuffer->depth_stencil_attachment = creation.depth_stencil_texture;
+    framebuffer->shader_rate_attachment = creation.shading_rate_attachment;
     framebuffer->width   = creation.width;
     framebuffer->height   = creation.height;
     framebuffer->layers = creation.layers;
@@ -2637,6 +2780,9 @@ FramebufferHandle GpuDevice::create_framebuffer( const FramebufferCreation& crea
     framebuffer->render_pass = creation.render_pass;
 
     if ( !dynamic_rendering_extension_present ) {
+        // TODO(marco): shading rate image
+        assert( creation.shading_rate_attachment.index == k_invalid_index );
+
         vulkan_create_framebuffer( *this, framebuffer );
     }
 
@@ -3022,6 +3168,8 @@ void GpuDevice::create_swapchain() {
         depth_texture_creation.set_size( swapchain_width, swapchain_height, 1 ).set_format_type( VK_FORMAT_D32_SFLOAT, TextureType::Texture2D ).set_name( "DepthImage_Texture" );
         vk_framebuffer->depth_stencil_attachment = create_texture( depth_texture_creation );
 
+        vk_framebuffer->shader_rate_attachment.index = k_invalid_index;
+
         Texture* depth_stencil_texture = access_texture( vk_framebuffer->depth_stencil_attachment );
 
         if ( !dynamic_rendering_extension_present ) {
@@ -3042,7 +3190,7 @@ void GpuDevice::create_swapchain() {
         submit_info.commandBufferInfoCount = 1;
         submit_info.pCommandBufferInfos = &command_buffer_info;
 
-        queue_submit2( vulkan_main_queue, 1, &submit_info, VK_NULL_HANDLE );
+        vkQueueSubmit2KHR( vulkan_main_queue, 1, &submit_info, VK_NULL_HANDLE );
     } else {
         VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.commandBufferCount = 1;
@@ -3352,7 +3500,6 @@ PagePoolHandle GpuDevice::allocate_texture_pool( TextureHandle texture_handle, u
     page_memory_requirements.alignment = memory_requirements.alignment;
     page_memory_requirements.size = memory_requirements.alignment;
 
-    // allocate multiple pages at once
     vmaAllocateMemoryPages( vma_allocator, &page_memory_requirements, &allocation_create_info, block_count, page_pool->vma_allocations.data, nullptr );
 
     return pool_handle;
@@ -3419,7 +3566,6 @@ void GpuDevice::bind_texture_pages( PagePoolHandle pool_handle, TextureHandle te
 
     u32 array_offset = pending_sparse_queue_binds.size;
 
-    // record which pages are assigned to each image:
     VkImageAspectFlags aspect = TextureFormat::has_depth( texture->vk_format ) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     for ( u32 block_y = 0; block_y < num_blocks_y; ++block_y ) {
         for ( u32 block_x = 0; block_x < num_blocks_x; ++block_x ) {
@@ -3429,12 +3575,9 @@ void GpuDevice::bind_texture_pages( PagePoolHandle pool_handle, TextureHandle te
             VmaAllocationInfo allocation_info{ };
             vmaGetAllocationInfo( vma_allocator, allocation, &allocation_info );
 
-            // compute the texture offset for each block
             i32 dest_x = ( i32 )( block_x * block_width + x );
             i32 dest_y = ( i32 )( block_y * block_height + y );
 
-            // record this information into a VkSparseImageMemoryBind data structure that
-            // will be used later to update the memory bound to the cubemap texture
             sparse_bind.subresource.aspectMask = aspect;
             sparse_bind.subresource.arrayLayer = layer;
             sparse_bind.offset = { dest_x, dest_y, 0 };
@@ -3446,11 +3589,8 @@ void GpuDevice::bind_texture_pages( PagePoolHandle pool_handle, TextureHandle te
         }
     }
 
-    // which image these pages will be bound to
     SparseMemoryBindInfo bind_info{ };
     bind_info.image = texture->vk_image;
-    // array_offset is an offset into the pending_sparse_queue_binds array so that we
-    // can store all pending allocations in a single array.
     bind_info.binding_array_offset = array_offset;
     bind_info.count = num_blocks;
 
@@ -3746,7 +3886,7 @@ void GpuDevice::present( CommandBuffer* async_compute_command_buffer ) {
             submit_info.signalSemaphoreInfoCount = 2;
             submit_info.pSignalSemaphoreInfos = signal_semaphores;
 
-            queue_submit2( vulkan_main_queue, 1, &submit_info, VK_NULL_HANDLE );
+            vkQueueSubmit2KHR( vulkan_main_queue, 1, &submit_info, VK_NULL_HANDLE );
 
             wait_semaphores.shutdown();
         } else {
@@ -3842,7 +3982,7 @@ void GpuDevice::present( CommandBuffer* async_compute_command_buffer ) {
             submit_info.signalSemaphoreInfoCount = 1;
             submit_info.pSignalSemaphoreInfos = signal_semaphores;
 
-            queue_submit2( vulkan_main_queue, 1, &submit_info, render_complete_fence );
+            vkQueueSubmit2KHR( vulkan_main_queue, 1, &submit_info, render_complete_fence );
 
             wait_semaphores.shutdown();
         } else {
@@ -4080,7 +4220,7 @@ void GpuDevice::submit_compute_load( CommandBuffer* command_buffer ) {
             submit_info.signalSemaphoreInfoCount = 1;
             submit_info.pSignalSemaphoreInfos = signal_semaphores;
 
-            queue_submit2( vulkan_compute_queue, 1, &submit_info, VK_NULL_HANDLE );
+            vkQueueSubmit2KHR( vulkan_compute_queue, 1, &submit_info, VK_NULL_HANDLE );
         } else {
             VkSemaphore wait_semaphores[] = { vulkan_compute_semaphore };
             VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT };
@@ -4135,7 +4275,7 @@ void GpuDevice::submit_compute_load( CommandBuffer* command_buffer ) {
             submit_info.signalSemaphoreInfoCount = 1;
             submit_info.pSignalSemaphoreInfos = signal_semaphores;
 
-            queue_submit2( vulkan_compute_queue, 1, &submit_info, vulkan_compute_fence );
+            vkQueueSubmit2KHR( vulkan_compute_queue, 1, &submit_info, vulkan_compute_fence );
         } else {
             VkSubmitInfo submit_info = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
             submit_info.waitSemaphoreCount = 0;

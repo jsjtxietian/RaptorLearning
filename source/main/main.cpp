@@ -211,7 +211,7 @@ u32 get_cube_face_mask( vec3s cube_map_pos, vec3s aabb[2] ) {
 int main( int argc, char** argv ) {
 
     if ( argc < 2 ) {
-        printf( "Usage: chapter8 [path to glTF model]\n");
+        printf( "Usage: chapter9 [path to glTF model]\n");
         InjectDefault3DModel();
     }
 
@@ -236,7 +236,7 @@ int main( int argc, char** argv ) {
     task_scheduler.Initialize( config );
 
     // window
-    WindowConfiguration wconf{ 1280, 800, "Raptor Chapter 8", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ 1280, 800, "Raptor Chapter 9", &MemoryService::instance()->system_allocator};
     raptor::Window window;
     window.init( &wconf );
 
@@ -286,12 +286,6 @@ int main( int argc, char** argv ) {
 
     time_service_init();
 
-    FrameGraphBuilder frame_graph_builder;
-    frame_graph_builder.init( &gpu );
-
-    FrameGraph frame_graph;
-    frame_graph.init( &frame_graph_builder );
-
     RenderResourcesLoader render_resources_loader;
     TextureResource* dither_texture = nullptr;
 
@@ -312,6 +306,70 @@ int main( int argc, char** argv ) {
     }
     strcpy( renderer.resource_cache.binary_data_folder, shader_binaries_folder );
     temporary_name_buffer.clear();
+
+    SceneGraph scene_graph;
+    scene_graph.init( allocator, 4 );
+
+    // [TAG: Multithreading]
+    AsynchronousLoader async_loader;
+    async_loader.init( &renderer, &task_scheduler, allocator );
+
+    Directory cwd{ };
+    directory_current(&cwd);
+
+    char file_base_path[512]{ };
+    memcpy( file_base_path, argv[ 1 ], strlen( argv[ 1] ) );
+    file_directory_from_path( file_base_path );
+
+    directory_change( file_base_path );
+
+    char file_name[512]{ };
+    memcpy( file_name, argv[ 1 ], strlen( argv[ 1] ) );
+    file_name_from_path( file_name );
+
+    RenderScene* scene = nullptr;
+
+    char* file_extension = file_extension_from_path( file_name );
+
+    if ( strcmp( file_extension, "gltf" ) == 0 ) {
+        scene = new glTFScene;
+    } else if ( strcmp( file_extension, "obj" ) == 0 ) {
+        scene = new ObjScene;
+    }
+
+    scene->use_meshlets = gpu.mesh_shaders_extension_present;
+    scene->use_meshlets_emulation = !scene->use_meshlets;
+    scene->init( file_name, file_base_path, allocator, &scratch_allocator, &async_loader );
+
+    // NOTE(marco): restore working directory
+    directory_change( cwd.path );
+
+    FrameGraphBuilder frame_graph_builder;
+    frame_graph_builder.init( &gpu );
+
+    FrameGraph frame_graph;
+    frame_graph.init( &frame_graph_builder );
+
+    if ( gpu.fragment_shading_rate_present )
+    {
+        TextureCreation texture_creation{ };
+        u32 adjusted_width = ( window.width + gpu.min_fragment_shading_rate_texel_size.width - 1 ) / gpu.min_fragment_shading_rate_texel_size.width;
+        u32 adjusted_height = ( window.height + gpu.min_fragment_shading_rate_texel_size.height - 1 ) / gpu.min_fragment_shading_rate_texel_size.height;
+        texture_creation.set_size( adjusted_width, adjusted_height, 1 ).set_format_type( VK_FORMAT_R8_UINT, TextureType::Texture2D ).set_mips( 1 ).set_layers( 1 ).set_flags( TextureFlags::Compute_mask | TextureFlags::ShadingRate_mask ).set_name( "fragment_shading_rate" );
+
+        scene->fragment_shading_rate_image = gpu.create_texture( texture_creation );
+
+        FrameGraphResourceInfo resource_info{ };
+
+        resource_info.external = true;
+
+        resource_info.texture.format = VK_FORMAT_R8_UINT;
+        resource_info.texture.width = adjusted_width;
+        resource_info.texture.height = adjusted_height;
+        resource_info.texture.handle = scene->fragment_shading_rate_image;
+
+        frame_graph.add_resource( "shading_rate_image", FrameGraphResourceType_ShadingRate, resource_info );
+    }
 
     // Load frame graph and parse gpu techniques
     {
@@ -356,43 +414,6 @@ int main( int argc, char** argv ) {
             parse_technique( techniques[ t ] );
         }
     }
-
-    SceneGraph scene_graph;
-    scene_graph.init( allocator, 4 );
-
-    // [TAG: Multithreading]
-    AsynchronousLoader async_loader;
-    async_loader.init( &renderer, &task_scheduler, allocator );
-
-    Directory cwd{ };
-    directory_current(&cwd);
-
-    char file_base_path[512]{ };
-    memcpy( file_base_path, argv[ 1 ], strlen( argv[ 1] ) );
-    file_directory_from_path( file_base_path );
-
-    directory_change( file_base_path );
-
-    char file_name[512]{ };
-    memcpy( file_name, argv[ 1 ], strlen( argv[ 1] ) );
-    file_name_from_path( file_name );
-
-    RenderScene* scene = nullptr;
-
-    char* file_extension = file_extension_from_path( file_name );
-
-    if ( strcmp( file_extension, "gltf" ) == 0 ) {
-        scene = new glTFScene;
-    } else if ( strcmp( file_extension, "obj" ) == 0 ) {
-        scene = new ObjScene;
-    }
-
-    scene->use_meshlets = gpu.mesh_shaders_extension_present;
-    scene->use_meshlets_emulation = !scene->use_meshlets;
-    scene->init( file_name, file_base_path, allocator, &scratch_allocator, &async_loader );
-
-    // NOTE(marco): restore working directory
-    directory_change( cwd.path );
 
     FrameRenderer frame_renderer;
     frame_renderer.init( allocator, &renderer, &frame_graph, &scene_graph, scene );
@@ -935,7 +956,6 @@ int main( int argc, char** argv ) {
                 Array<vec3s> lights_aabb_view;
                 lights_aabb_view.init( allocator, light_count * 2, light_count * 2 );
 
-                //  computing the bounding box for each light in camera space:
                 for ( u32 l = 0; l < light_count; ++l ) {
                     Light& light = scene->lights[ l ];
                     light.shadow_map_resolution = 0.0f;
@@ -996,7 +1016,6 @@ int main( int argc, char** argv ) {
                                 vec3s& light_aabb_min = lights_aabb_view[ l * 2 ];
                                 vec3s& light_aabb_max = lights_aabb_view[ l * 2 + 1 ];
 
-                                // box intersection test between the light and the cluster
                                 f32 minx = min( min( light_aabb_min.x, light_aabb_max.x ), min( min_point_aabb_view.x, max_point_aabb_view.x ) );
                                 f32 miny = min( min( light_aabb_min.y, light_aabb_max.y ), min( min_point_aabb_view.y, max_point_aabb_view.y ) );
                                 f32 minz = min( min( light_aabb_min.z, light_aabb_max.z ), min( min_point_aabb_view.z, max_point_aabb_view.z ) );
@@ -1015,7 +1034,6 @@ int main( int argc, char** argv ) {
 
                                 bool intersects = ( dx <= allx ) && ( dy < ally ) && ( dz <= allz );
 
-                                // compute an approximation of the projected area of the light onto the cluster
                                 if ( intersects ) {
                                     intersects_light = true;
 
@@ -1027,9 +1045,6 @@ int main( int argc, char** argv ) {
 
                                     vec2s sphere_screen{ ( ( sphere_ndc.x + 1.0f ) * 0.5f ) * scene_data.resolution_x, ( ( sphere_ndc.y + 1.0f ) * 0.5f ) * scene_data.resolution_y, };
 
-                                    // The idea is to take the distance between the light and cluster center in screen space, compute
-                                    // the solid angle subtended by the cluster onto the light position, and compute the resolution of
-                                    // the cubemap using the size in pixels of the cluster.
                                     f32 d = glms_vec2_distance( sphere_screen, tile_center );
 
                                     f32 diff = d * d - tile_radius_sq;
