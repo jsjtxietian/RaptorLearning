@@ -46,16 +46,18 @@ void main() {
 
     vec4 color = vec4(0);
 
+    const vec2 screen_uv = uv_from_pixels(ivec2( gl_FragCoord.xy ), output_width, output_height);
     const float raw_depth = texelFetch(global_textures[nonuniformEXT(textures.w)], ivec2( gl_FragCoord.xy ), 0).r;
     if ( raw_depth == 1.0f ) {
         color = vec4( base_colour.rgb, 1 );
     }
     else {
-        const vec2 screen_uv = uv_from_pixels(ivec2( gl_FragCoord.xy ), output_width, output_height);
         const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, inverse_view_projection);
 
         color = calculate_lighting( base_colour, orm, normal, emissive, pixel_world_position );
     }
+
+    color.rgb = apply_volumetric_fog( screen_uv, raw_depth, color.rgb );
 
 #if 0
     vec3 sr_color = vec3( 0.5, 0, 0 );
@@ -104,6 +106,7 @@ void main() {
         color = calculate_lighting( base_colour, orm, normal, emissive, pixel_world_position );
     }
 
+    // DEBUG:
     if ( debug_modes > 0 ) {
 
         if ( debug_modes == 1 ) {
@@ -250,7 +253,6 @@ void main() {
     ivec2 local_index = ivec2( gl_LocalInvocationID.xy ) + ivec2( 1, 1 );
     ivec2 global_index = ivec2( gl_GlobalInvocationID.xy );
 
-    // Each entry in the table contains the luminance value for the fragment for this shader invocation
     local_image_data[ local_index.y ][ local_index.x ] = luminance( texelFetch( global_textures[ color_image_index ], global_index, 0 ).rgb );
 
     if ( local_index.x == 1 && local_index.y == 1 ) {
@@ -281,7 +283,6 @@ void main() {
 
     float normalization = 1.0; // 0.125;
 
-    // Sobel filter
     // Horizontal filter
     float dx =     local_image_data[ local_index.y - 1 ][ local_index.x - 1 ] -
                    local_image_data[ local_index.y - 1 ][ local_index.x + 1 ] +
@@ -304,7 +305,6 @@ void main() {
 
     float d = pow( dx, 2 ) + pow( dy, 2 );
 
-    // store the shading rate for this fragment
     // NOTE(marco): 2x2 rate
     uint rate = 1 << 2 | 1;
 
