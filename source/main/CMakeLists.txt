@@ -1,4 +1,4 @@
-add_executable(Chapter5
+add_executable(Chapter10
     graphics/asynchronous_loader.cpp
     graphics/asynchronous_loader.hpp
     graphics/command_buffer.cpp
@@ -33,28 +33,28 @@ add_executable(Chapter5
     main.cpp
 )
 
-set_property(TARGET Chapter5 PROPERTY CXX_STANDARD 17)
+set_property(TARGET Chapter10 PROPERTY CXX_STANDARD 17)
 
 if (WIN32)
-    target_compile_definitions(Chapter5 PRIVATE
+    target_compile_definitions(Chapter10 PRIVATE
         _CRT_SECURE_NO_WARNINGS
         WIN32_LEAN_AND_MEAN
         NOMINMAX)
 endif()
 
-target_compile_definitions(Chapter5 PRIVATE
+target_compile_definitions(Chapter10 PRIVATE
     RAPTOR_WORKING_FOLDER="${CMAKE_CURRENT_SOURCE_DIR}"
     RAPTOR_SHADER_FOLDER="${CMAKE_CURRENT_SOURCE_DIR}/shaders/"
     RAPTOR_DATA_FOLDER="${CMAKE_SOURCE_DIR}/binaries/data"
 )
 
-target_compile_definitions(Chapter5 PRIVATE
+target_compile_definitions(Chapter10 PRIVATE
     TRACY_ENABLE
     TRACY_ON_DEMAND
     TRACY_NO_SYSTEM_TRACING
 )
 
-target_include_directories(Chapter5 PRIVATE
+target_include_directories(Chapter10 PRIVATE
     .
     ..
     ../raptor
@@ -63,35 +63,35 @@ target_include_directories(Chapter5 PRIVATE
 )
 
 if (WIN32)
-    target_link_directories(Chapter5 PRIVATE
+    target_link_directories(Chapter10 PRIVATE
         ../../binaries/assimp/windows/bin
         ../../binaries/assimp/windows/lib
         ../../binaries/SDL2-2.0.18/lib/x64
     )
 
-    target_include_directories(Chapter5 PRIVATE
+    target_include_directories(Chapter10 PRIVATE
         ../../binaries/SDL2-2.0.18/include)
 else()
-    target_link_directories(Chapter5 PRIVATE
+    target_link_directories(Chapter10 PRIVATE
         ../../binaries/assimp/linux/lib)
 
-    target_include_directories(Chapter5 PRIVATE
+    target_include_directories(Chapter10 PRIVATE
         ${SDL2_INCLUDE_DIRS})
 endif()
 
 if (WIN32)
-    target_link_libraries(Chapter5 PRIVATE
+    target_link_libraries(Chapter10 PRIVATE
         assimp-vc142-mt
         SDL2)
 else()
-    target_link_libraries(Chapter5 PRIVATE
+    target_link_libraries(Chapter10 PRIVATE
         dl
         pthread
         assimp
         SDL2::SDL2)
 endif()
 
-target_link_libraries(Chapter5 PRIVATE
+target_link_libraries(Chapter10 PRIVATE
     RaptorFoundation
     RaptorExternal
     RaptorApp
@@ -105,7 +105,7 @@ if (WIN32)
     )
 
     foreach(DLL ${DLLS_TO_COPY})
-        add_custom_command(TARGET Chapter5 POST_BUILD
+        add_custom_command(TARGET Chapter10 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy ${DLL} "$(OutDir)"
             VERBATIM
         )
