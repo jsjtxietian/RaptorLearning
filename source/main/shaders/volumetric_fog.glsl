@@ -25,12 +25,12 @@ layout ( std140, set = MATERIAL_SET, binding = 40 ) uniform VolumetricFogConstan
 
     float       height_fog_density;
     float       height_fog_falloff;
-    int         current_frame;
+    float       pad100_vfc;
     float       noise_scale;
 
-    float       integration_noise_scale;
+    float       lighting_noise_scale;
     uint        noise_type;
-    uint        blue_noise_128_rg_texture_index;
+    uint        pad000_vfc;
     uint        use_spatial_filtering;
 
     uint        volumetric_noise_texture_index;
@@ -50,21 +50,6 @@ layout ( std140, set = MATERIAL_SET, binding = 40 ) uniform VolumetricFogConstan
 #define FROXEL_DISPATCH_Z 1
 
 // Noise helper functions ////////////////////////////////////////////////
-float remap_noise_tri( float v ) {
-    v = v * 2.0 - 1.0;
-    return sign(v) * (1.0 - sqrt(1.0 - abs(v)));
-}
-
-// Takes 2 noises in space [0..1] and remaps them in [-1..1]
-float triangular_noise( float noise0, float noise1 ) {
-    return noise0 + noise1 - 1.0f;
-}
-
-float interleaved_gradient_noise(vec2 pixel, int frame) {
-    pixel += (float(frame) * 5.588238f);
-    return fract(52.9829189f * fract(0.06711056f*float(pixel.x) + 0.00583715f*float(pixel.y)));  
-}
-
 float generate_noise(vec2 pixel, int frame, float scale) {
     // Animated blue noise using golden ratio.
     if (noise_type == 0) {
@@ -91,7 +76,8 @@ float generate_noise(vec2 pixel, int frame, float scale) {
 
 // Coordinate transformations ////////////////////////////////////////////
 vec2 uv_from_froxels( vec2 froxel_position, uint width, uint height ) {
-    return froxel_position / vec2(width * 1.f, height * 1.f);
+    vec2 uv = floor(froxel_position) + .5;
+    return uv / vec2(width * 1.f, height * 1.f);
 }
 
 vec3 world_from_froxel(ivec3 froxel_coord) {
@@ -187,7 +173,6 @@ vec4 scattering_extinction_from_color_density( vec3 color, float density ) {
 
 #if defined(COMPUTE_INJECT_DATA)
 
-// one thread for one froxel cell
 layout (local_size_x = FROXEL_DISPATCH_X, local_size_y = FROXEL_DISPATCH_Y, local_size_z = FROXEL_DISPATCH_Z) in;
 void main() {
     ivec3 froxel_coord = ivec3(gl_GlobalInvocationID.xyz);
@@ -196,7 +181,6 @@ void main() {
 
     vec4 scattering_extinction = vec4(0);
 
-    // add an optional noise to animate the fog and break the constant density
     vec3 sampling_coord = world_position * volumetric_noise_position_multiplier + vec3(1,0.1,2) * current_frame * volumetric_noise_speed_multiplier;
     float fog_noise = texture(global_textures_3d[nonuniformEXT(volumetric_noise_texture_index)], sampling_coord).r;
     fog_noise = saturate(fog_noise * fog_noise);
@@ -235,14 +219,11 @@ void main() {
 
     vec3 rcp_froxel_dim = 1.0f / froxel_dimensions.xyz;
     vec3 fog_data_uvw = froxel_coord * rcp_froxel_dim;
-    // read scattering and extinction from the result of the injection shader
     vec4 scattering_extinction = texture(global_textures_3d[nonuniformEXT(froxel_data_texture_index)], fog_data_uvw);
 
     float extinction = scattering_extinction.a;
     vec3 lighting = vec3(0);
 
-    // having the clustered bin already developed,
-    // use that to query lights in a defined volume starting from the world space position
     if ( extinction >= 0.01f ) {
         vec3 V = normalize(camera_position.xyz - world_position);
 
@@ -311,7 +292,11 @@ void main() {
                 }
             }
         }
-    }    
+    }
+
+    // Add lighting dithering
+    float lighting_noise = generate_noise(froxel_coord.xy * 1.0f, current_frame, lighting_noise_scale);
+    lighting += vec3(lighting_noise);
 
     vec3 scattering = scattering_extinction.rgb * lighting;
 
@@ -342,11 +327,10 @@ void main() {
     vec3 rcp_froxel_dim = 1.0f / froxel_dimensions.xyz;
 
     for ( int z = 0; z < froxel_dimensions.z; ++z ) {
+
         froxel_coord.z = z;
 
-        float jittering = 0;//generate_noise(froxel_coord.xy * 1.0f, current_frame, integration_noise_scale);
-        // calculate the depth difference to have the thickness needed for the extinction integral
-        float next_z = slice_to_exponential_depth_jittered( froxel_near, froxel_far, jittering, z + 1, int(froxel_dimensions.z) );
+        float next_z = slice_to_exponential_depth( froxel_near, froxel_far, z + 1, int(froxel_dimensions.z) );
 
         const float z_step = abs(next_z - current_z);
         current_z = next_z;
