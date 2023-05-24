@@ -440,6 +440,11 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
                 ray_tracing_present = true;
                 continue;
             }
+
+            if ( !strcmp( extensions[ i ].extensionName, VK_KHR_RAY_QUERY_EXTENSION_NAME ) ) {
+                ray_query_present = true;
+                continue;
+            }
         }
 
         temp_allocator->free_marker( initial_temp_allocator_marker );
@@ -491,9 +496,11 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
 
     acceleration_structure_features = VkPhysicalDeviceAccelerationStructureFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
     ray_tracing_pipeline_features = VkPhysicalDeviceRayTracingPipelineFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
+    ray_query_features = VkPhysicalDeviceRayQueryFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
     if ( ray_tracing_present ) {
         indexing_features.pNext = &acceleration_structure_features;
         acceleration_structure_features.pNext = &ray_tracing_pipeline_features;
+        ray_tracing_pipeline_features.pNext = &ray_query_features;
     }
 
     vkGetPhysicalDeviceFeatures2( vulkan_physical_device, &device_features );
@@ -594,6 +601,10 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         device_extensions.push( VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME );
     }
 
+    if ( ray_query_present ) {
+        device_extensions.push( VK_KHR_RAY_QUERY_EXTENSION_NAME );
+    }
+
     const float queue_priority[] = { 1.0f, 1.0f };
     VkDeviceQueueCreateInfo queue_info[ 3 ] = {};
 
@@ -665,6 +676,11 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         acceleration_structure_features.pNext = current_pnext;
 
         current_pnext = &ray_tracing_pipeline_features;
+    }
+
+    if ( ray_query_present ) {
+        ray_query_features.pNext = current_pnext;
+        current_pnext = &ray_query_features;
     }
 
     physical_features2.pNext = current_pnext;
@@ -739,7 +755,6 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
 
         vkCreateAccelerationStructureKHR = ( PFN_vkCreateAccelerationStructureKHR )vkGetDeviceProcAddr( vulkan_device, "vkCreateAccelerationStructureKHR" );
         vkDestroyAccelerationStructureKHR = ( PFN_vkDestroyAccelerationStructureKHR )vkGetDeviceProcAddr( vulkan_device, "vkDestroyAccelerationStructureKHR" );
-
         vkCmdBuildAccelerationStructuresKHR = ( PFN_vkCmdBuildAccelerationStructuresKHR )vkGetDeviceProcAddr( vulkan_device, "vkCmdBuildAccelerationStructuresKHR" );
         vkCmdBuildAccelerationStructuresIndirectKHR = ( PFN_vkCmdBuildAccelerationStructuresIndirectKHR )vkGetDeviceProcAddr( vulkan_device, "vkCmdBuildAccelerationStructuresIndirectKHR" );
         vkCmdWriteAccelerationStructuresPropertiesKHR = ( PFN_vkCmdWriteAccelerationStructuresPropertiesKHR )vkGetDeviceProcAddr( vulkan_device, "vkCmdWriteAccelerationStructuresPropertiesKHR" );
@@ -977,9 +992,9 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     // Init resource tracker
 #if defined (RAPTOR_GPU_DEVICE_RESOURCE_TRACKING)
     resource_tracker.init( allocator );
-    resource_tracker.tracked_resource_type = ResourceUpdateType::Buffer;
-    resource_tracker.tracked_resource_index = 17;
-    resource_tracker.track_resource = true;
+    resource_tracker.tracked_resource_type = ResourceUpdateType::Texture;
+    resource_tracker.tracked_resource_index = 31;
+    resource_tracker.track_resource = false;
     resource_tracker.track_all_indices_per_type = false;
 #endif // RAPTOR_GPU_DEVICE_RESOURCE_TRACKING
 
@@ -1369,7 +1384,7 @@ static void vulkan_create_texture( GpuDevice& gpu, const TextureCreation& creati
         RASSERT( alias_texture != nullptr );
         RASSERT( !is_sparse_texture );
 
-        texture->vma_allocation = 0;
+        texture->vma_allocation = nullptr;
         check( vmaCreateAliasingImage( gpu.vma_allocator, alias_texture->vma_allocation, &image_info, &texture->vk_image ) );
     }
 
@@ -1756,7 +1771,8 @@ ShaderStateHandle GpuDevice::create_shader_state( const ShaderStateCreation& cre
             if ( vkCreateShaderModule( vulkan_device, &shader_create_info, nullptr, &shader_state->shader_stage_info[ compiled_shaders ].module ) != VK_SUCCESS ) {
                 broken_stage = compiled_shaders;
             }
-        } else {
+        }
+        else {
             broken_stage = compiled_shaders;
         }
 
@@ -3112,7 +3128,7 @@ void GpuDevice::destroy_buffer_instant( ResourceHandle buffer ) {
 void GpuDevice::destroy_texture_instant( ResourceHandle texture ) {
     Texture* v_texture = ( Texture* )textures.access_resource( texture );
 
-    // Skip double frees
+    // Skip double frees.
     if ( !v_texture->vk_image_view ) {
         return;
     }
@@ -3122,9 +3138,14 @@ void GpuDevice::destroy_texture_instant( ResourceHandle texture ) {
         vkDestroyImageView( vulkan_device, v_texture->vk_image_view, vulkan_allocation_callbacks );
         v_texture->vk_image_view = VK_NULL_HANDLE;
 
+        // Standard texture: vma allocation valid, and is NOT a texture view (parent_texture is invalid)
         if ( v_texture->vma_allocation != 0 && v_texture->parent_texture.index == k_invalid_texture.index ) {
             vmaDestroyImage( vma_allocator, v_texture->vk_image, v_texture->vma_allocation );
         } else if ( ( v_texture->flags & TextureFlags::Sparse_mask ) == TextureFlags::Sparse_mask ) {
+            // Sparse textures
+            vkDestroyImage( vulkan_device, v_texture->vk_image, vulkan_allocation_callbacks );
+        } else if ( v_texture->vma_allocation == nullptr ) {
+            // Aliased textures
             vkDestroyImage( vulkan_device, v_texture->vk_image, vulkan_allocation_callbacks );
         }
     }
@@ -3572,9 +3593,14 @@ void GpuDevice::resize_output_textures( FramebufferHandle framebuffer, u32 width
 
 void GpuDevice::resize_texture( TextureHandle texture, u32 width, u32 height ) {
 
+   resize_texture_3d( texture, width, height, 1 );
+}
+
+void GpuDevice::resize_texture_3d( TextureHandle texture, u32 width, u32 height, u32 depth ) {
+
     Texture* vk_texture = access_texture( texture );
 
-    if ( vk_texture->width == width && vk_texture->height == height ) {
+    if ( vk_texture->width == width && vk_texture->height == height && vk_texture->depth == depth ) {
         return;
     }
 
@@ -3593,7 +3619,7 @@ void GpuDevice::resize_texture( TextureHandle texture, u32 width, u32 height ) {
     // Re-create image in place.
     TextureCreation tc;
     tc.set_flags( vk_texture->flags ).set_format_type( vk_texture->vk_format, vk_texture->type )
-      .set_name( vk_texture->name ).set_size( width, height, vk_texture->depth )
+      .set_name( vk_texture->name ).set_size( width, height, depth )
       .set_mips( vk_texture->mip_level_count );
     vulkan_create_texture( *this, tc, vk_texture->handle, vk_texture );
 
@@ -3960,6 +3986,11 @@ void GpuDevice::present( CommandBuffer* async_compute_command_buffer ) {
                 texture_to_update_bindless.delete_swap( it );
 
                 ++current_write_index;
+
+                // Debug
+                //if ( strcmp("", texture->name) == 0 ) {
+                    //rprint( "%s texture %u\n", add_texture_to_delete ? "Deleting" : "Updating", texture->handle.index );
+                //}
 
                 // Add texture to delete
                 if ( add_texture_to_delete ) {

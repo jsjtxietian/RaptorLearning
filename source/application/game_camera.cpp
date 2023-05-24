@@ -120,6 +120,8 @@ void GameCamera::apply_jittering( f32 x, f32 y ) {
     // Reset camera projection
     camera.calculate_projection_matrix();
 
+    // Perform the same calculations as before, with the observation that
+    // we modify only 2 elements in the projection matrix:
     //camera.projection.m20 += x;
     //camera.projection.m21 += y;
     mat4s jittering_matrix = glms_translate_make( { x, y, 0.0f } );
