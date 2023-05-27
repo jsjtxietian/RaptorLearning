@@ -504,16 +504,14 @@ vec3 taa_raptor( ivec2 pos ) {
             history_color.rgb = clip_aabb(neighborhood_min, neighborhood_max, vec4(history_color, 1.0f), 1.0f).rgb;
             break;
 
-        // the most complete and robust history clipping mode
         case HistoryConstraintModeVarianceClip: {
-            // Calculate color AABB using color moments m1 and m2
             float rcp_sample_count = 1.0f / 9.0f;
             float gamma = 1.0f;
             vec3 mu = m1 * rcp_sample_count;
             vec3 sigma = sqrt(abs((m2 * rcp_sample_count) - (mu * mu)));
             vec3 minc = mu - gamma * sigma;
             vec3 maxc = mu + gamma * sigma;
-            // Clamp to new AABB
+
             history_color.rgb = clip_aabb(minc, maxc, vec4(history_color, 1), 1.0f).rgb;
 
             break;
@@ -539,8 +537,7 @@ vec3 taa_raptor( ivec2 pos ) {
     vec3 history_weight = vec3(1.0 - current_weight);
 
 
-    // Temporal filtering, ses the cached neighborhood minimum and
-    // maximum colors to calculate how much to blend the current and previous colors:
+    // Temporal filtering
     if (use_temporal_filtering() ) {
         vec3 temporal_weight = clamp(abs(neighborhood_max - neighborhood_min) / current_sample, vec3(0), vec3(1));
         history_weight = clamp(mix(vec3(0.25), vec3(0.85), temporal_weight), vec3(0), vec3(1));
@@ -548,7 +545,6 @@ vec3 taa_raptor( ivec2 pos ) {
     }
 
     // Inverse luminance filtering
-    // one used to suppress so-called fireflies
     if (use_inverse_luminance_filtering() || use_luminance_difference_filtering() ) {
         // Calculate compressed colors and luminances
         vec3 compressed_source = current_sample / (max(max(current_sample.r, current_sample.g), current_sample.b) + 1.0f);
@@ -611,12 +607,10 @@ layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 void main() {
     ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
 
-    // Read the raw depth and reconstruct NDC coordinates.
     const float raw_depth = texelFetch(global_textures[nonuniformEXT(depth_texture_index)], pos.xy, 0).r;
     const vec2 screen_uv = uv_nearest(pos.xy, resolution);
-    
-    // Reconstruct world position and previous NDC position
     const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, inverse_view_projection);
+
     vec4 current_position_ndc = vec4( ndc_from_uv_raw_depth( screen_uv, raw_depth ), 1.0f );
     vec4 previous_position_ndc = previous_view_projection * vec4(pixel_world_position, 1.0f);
     previous_position_ndc.xyz /= previous_position_ndc.w;

@@ -568,11 +568,14 @@ namespace JitterType {
 int main( int argc, char** argv ) {
 
     if ( argc < 2 ) {
-        printf( "Usage: chapter11 [path to glTF model]\n");
+        printf( "Usage: chapter12 [path to glTF model]\n");
         InjectDefault3DModel();
     }
 
     using namespace raptor;
+
+    time_service_init();
+
     // Init services
     MemoryServiceConfiguration memory_configuration;
     memory_configuration.maximum_dynamic_size = rgiga( 2ull );
@@ -593,7 +596,7 @@ int main( int argc, char** argv ) {
     task_scheduler.Initialize( config );
 
     // window
-    WindowConfiguration wconf{ 1280, 800, "Raptor Chapter 11", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ 1280, 800, "Raptor Chapter 12", &MemoryService::instance()->system_allocator};
     raptor::Window window;
     window.init( &wconf );
 
@@ -640,8 +643,6 @@ int main( int argc, char** argv ) {
     GameCamera game_camera;
     game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
     game_camera.init( true, 20.f, 6.f, 0.1f );
-
-    time_service_init();
 
     RenderResourcesLoader render_resources_loader;
 
@@ -695,7 +696,7 @@ int main( int argc, char** argv ) {
 
     scene->use_meshlets = gpu.mesh_shaders_extension_present;
     scene->use_meshlets_emulation = !scene->use_meshlets;
-    scene->init( file_name, file_base_path, allocator, &scratch_allocator, &async_loader );
+    scene->init( file_name, file_base_path, &scene_graph, allocator, &scratch_allocator, &async_loader );
 
     // NOTE(marco): restore working directory
     directory_change( cwd.path );
@@ -725,7 +726,7 @@ int main( int argc, char** argv ) {
     SamplerHandle repeat_sampler, repeat_nearest_sampler;
     // Load frame graph and parse gpu techniques
     {
-        cstring frame_graph_path = temporary_name_buffer.append_use_f( "%s/%s", RAPTOR_WORKING_FOLDER, "graph.json" );
+        cstring frame_graph_path = temporary_name_buffer.append_use_f( "%s/%s", RAPTOR_WORKING_FOLDER, "graph_ray_tracing.json" );
 
         frame_graph.parse( frame_graph_path, &scratch_allocator );
         frame_graph.compile();
@@ -733,7 +734,7 @@ int main( int argc, char** argv ) {
         // TODO: improve
         // Manually add point shadows texture format.
         FrameGraphNode* point_shadows_pass_node = frame_graph.get_node( "point_shadows_pass" );
-        if ( point_shadows_pass_node ) {
+        if ( point_shadows_pass_node) {
             RenderPass* render_pass = gpu.access_render_pass( point_shadows_pass_node->render_pass );
             if ( render_pass ) {
                 render_pass->output.reset().depth( VK_FORMAT_D16_UNORM, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL );
@@ -799,10 +800,12 @@ int main( int argc, char** argv ) {
     // NOTE(marco): build AS before preparing draws
     {
         CommandBuffer* gpu_commands = gpu.get_command_buffer( 0, 0, true );
-
+        
         // NOTE(marco): build BLAS
+        // query how much memory our AS requires
         VkAccelerationStructureBuildGeometryInfoKHR as_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
         as_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        // this BLAS could be updated or compacted in the future
         as_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
         as_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
         as_info.geometryCount = scene->geometries.size;
@@ -814,10 +817,13 @@ int main( int argc, char** argv ) {
         for ( u32 range_index = 0; range_index < scene->geometries.size; range_index++ ) {
             max_primitives_count[ range_index ] = scene->build_range_infos[ range_index ].primitiveCount;
         }
-
+        
+        // query the size of our AS
         VkAccelerationStructureBuildSizesInfoKHR as_size_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
         gpu.vkGetAccelerationStructureBuildSizesKHR( gpu.vulkan_device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &as_info, max_primitives_count.data, &as_size_info );
 
+        // When building an AS, provide two buffers: 
+        // one for the actual AS data, and one for a scratch buffer that is used in the building process
         BufferCreation as_buffer_creation{ };
         as_buffer_creation.set( VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, ResourceUsageType::Immutable, as_size_info.accelerationStructureSize ).set_device_only( true ).set_name( "blas_buffer" );
         scene->blas_buffer = gpu.create_buffer( as_buffer_creation );
@@ -828,16 +834,19 @@ int main( int argc, char** argv ) {
 
         BufferHandle blas_scratch_buffer_handle = gpu.create_buffer( as_buffer_creation );
 
+        // retrieve a handle for AS:
         VkAccelerationStructureCreateInfoKHR as_create_info{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
         as_create_info.buffer = blas_buffer->vk_buffer;
         as_create_info.offset = 0;
         as_create_info.size = as_size_info.accelerationStructureSize;
         as_create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
 
+        // At this point, scene->blas is only a handle.
         gpu.vkCreateAccelerationStructureKHR( gpu.vulkan_device, &as_create_info, gpu.vulkan_allocation_callbacks, &scene->blas );
 
         as_info.dstAccelerationStructure = scene->blas;
 
+        // record the command to build the AS:
         as_info.scratchData.deviceAddress = gpu.get_buffer_device_address( blas_scratch_buffer_handle );
 
         VkAccelerationStructureBuildRangeInfoKHR* blas_ranges[] = {
@@ -846,6 +855,8 @@ int main( int argc, char** argv ) {
 
         gpu.vkCmdBuildAccelerationStructuresKHR( gpu_commands->vk_command_buffer, 1, &as_info, blas_ranges );
 
+        // it’s not possible to build a BLAS and TLAS on the same submission
+        // as the TLAS depends on a fully constructed BLAS.
         gpu.submit_immediate( gpu_commands );
 
         // NOTE(marco): build TLAS
@@ -856,9 +867,10 @@ int main( int argc, char** argv ) {
 
         VkAccelerationStructureInstanceKHR tlas_structure{ };
         // NOTE(marco): identity matrix
+        // provide a BLAS reference and its transform
         tlas_structure.transform.matrix[ 0 ][ 0 ] = 1.0f;
         tlas_structure.transform.matrix[ 1 ][ 1 ] = 1.0f;
-        tlas_structure.transform.matrix[ 2 ][ 2 ] = 1.0f;
+        tlas_structure.transform.matrix[ 2 ][ 2 ] = -1.0f;
         tlas_structure.mask = 0xff;
         tlas_structure.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
         tlas_structure.accelerationStructureReference = blas_address;
@@ -1035,7 +1047,6 @@ int main( int argc, char** argv ) {
         // Jittering update
         static u32 jitter_index = 0;
         static JitterType::Enum jitter_type = JitterType::Halton;
-        // A good period is normally four frames
         static u32 jitter_period = 2;
         vec2s jitter_values = vec2s{ 0.0f, 0.0f };
 
@@ -1065,7 +1076,6 @@ int main( int argc, char** argv ) {
         jitter_offsets.y *= jitter_scale;
 
         // Update also projection matrix of the camera.
-        // add sub-pixel jittering, thus need to divide these offsets by the screen resolution
         if ( scene->taa_enabled && scene->taa_jittering_enabled ) {
             game_camera.apply_jittering( jitter_offsets.x / gpu.swapchain_width, jitter_offsets.y / gpu.swapchain_height );
         }

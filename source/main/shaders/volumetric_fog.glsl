@@ -163,7 +163,6 @@ float remap( float value, float oldMin, float oldMax, float newMin,float newMax)
     return newMin + (value - oldMin) / (oldMax - oldMin) * (newMax - newMin);
 }
 
-// converts color and density to scattering and extinction
 vec4 scattering_extinction_from_color_density( vec3 color, float density ) {
 
     const float extinction = scattering_factor * density;
@@ -201,7 +200,6 @@ void main() {
         scattering_extinction += scattering_extinction_from_color_density( box_fog_color.rgb, box_fog_density * fog_noise);
     }
 
-    // store the scattering and extinction, ready to be lit in the next shader:
     imageStore( global_images_3d[froxel_data_texture_index], froxel_coord.xyz, scattering_extinction );
 }
 
@@ -307,11 +305,6 @@ void main() {
 
 
 #if defined(COMPUTE_LIGHT_INTEGRATION)
-// performing the ray marching in the froxel texture and performing the intermediate calculations in each cell
-// It will still write in a frustum-aligned texture, but each cell will
-// contain the accumulated scattering and transmittance starting from that cell.
-// ransmittance being a quantity that integrates extinction to a certain space. 
-// The final stored result is scattering and transmittance
 
 // Dispatch with Z = 1 as we perform the integration.
 layout (local_size_x = FROXEL_DISPATCH_X, local_size_y = FROXEL_DISPATCH_Y, local_size_z = 1) in;

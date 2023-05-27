@@ -530,7 +530,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
 #endif // DEBUG
 
         // Search for main queue that should be able to do all work (graphics, compute and transfer)
-        if ( (queue_family.queueFlags & ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT  )) == ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT  ) ) {
+        if ( (queue_family.queueFlags & ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT )) == ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT ) ) {
             main_queue_family_index = fi;
 
             RASSERT( ( queue_family.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT ) == VK_QUEUE_SPARSE_BINDING_BIT );
@@ -993,7 +993,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
 #if defined (RAPTOR_GPU_DEVICE_RESOURCE_TRACKING)
     resource_tracker.init( allocator );
     resource_tracker.tracked_resource_type = ResourceUpdateType::Texture;
-    resource_tracker.tracked_resource_index = 31;
+    resource_tracker.tracked_resource_index = 45;
     resource_tracker.track_resource = false;
     resource_tracker.track_all_indices_per_type = false;
 #endif // RAPTOR_GPU_DEVICE_RESOURCE_TRACKING
@@ -1384,7 +1384,7 @@ static void vulkan_create_texture( GpuDevice& gpu, const TextureCreation& creati
         RASSERT( alias_texture != nullptr );
         RASSERT( !is_sparse_texture );
 
-        texture->vma_allocation = nullptr;
+        texture->vma_allocation = 0;
         check( vmaCreateAliasingImage( gpu.vma_allocator, alias_texture->vma_allocation, &image_info, &texture->vk_image ) );
     }
 
@@ -2182,6 +2182,8 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
         pipeline_info.pStages = shader_state_data->shader_stage_info;
         pipeline_info.groupCount = shader_state_data->active_shaders;
         pipeline_info.pGroups = shader_state_data->shader_group_info;
+        // It determines the maximum number of call
+        // stacks in case we have a recursive call to the rayTraceEXT function
         pipeline_info.maxPipelineRayRecursionDepth = 1;
         pipeline_info.pLibraryInfo = nullptr;
         pipeline_info.pLibraryInterface = nullptr;
@@ -2192,6 +2194,7 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
 
         pipeline->vk_bind_point = VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
 
+        // sbt
         u32 group_handle_size = ray_tracing_pipeline_properties.shaderGroupHandleSize;
         sizet shader_binding_table_size = group_handle_size * shader_state_data->active_shaders;
 
@@ -2201,6 +2204,7 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
 
         check( vkGetRayTracingShaderGroupHandlesKHR( vulkan_device, pipeline->vk_pipeline, 0, shader_state_data->active_shaders, shader_binding_table_size, shader_binding_table_data.data ) );
 
+        // They are stored in separate buffers
         BufferCreation shader_binding_table_creation{ };
         shader_binding_table_creation.set( VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR, ResourceUsageType::Immutable, group_handle_size ).set_data( shader_binding_table_data.data ).set_name( "shader_binding_table_raygen" );
         pipeline->shader_binding_table_raygen = create_buffer( shader_binding_table_creation );
