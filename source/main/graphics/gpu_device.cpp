@@ -241,32 +241,6 @@ static const u32        k_bindless_texture_binding = 10;
 static const u32        k_bindless_image_binding = 11;
 static const u32        k_max_bindless_resources = 1024;
 
-bool GpuDevice::get_family_queue( VkPhysicalDevice physical_device ) {
-    u32 queue_family_count = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, nullptr );
-
-    VkQueueFamilyProperties* queue_families = ( VkQueueFamilyProperties* )ralloca( sizeof( VkQueueFamilyProperties ) * queue_family_count, allocator );
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families );
-
-    u32 family_index = 0;
-    VkBool32 surface_supported;
-    for ( ; family_index < queue_family_count; ++family_index ) {
-        VkQueueFamilyProperties queue_family = queue_families[ family_index ];
-        if ( queue_family.queueCount > 0 && queue_family.queueFlags & ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT ) ) {
-            vkGetPhysicalDeviceSurfaceSupportKHR( physical_device, family_index, vulkan_window_surface, &surface_supported);
-
-            if ( surface_supported ) {
-                vulkan_main_queue_family = family_index;
-                break;
-            }
-        }
-    }
-
-    rfree( queue_families, allocator );
-
-    return surface_supported;
-}
-
 void GpuDevice::init( const GpuDeviceCreation& creation ) {
 
     rprint( "Gpu Device init\n" );
@@ -351,15 +325,6 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     result = vkEnumeratePhysicalDevices( vulkan_instance, &num_physical_device, gpus );
     check( result );
 
-    //////// Create drawable surface
-    // Create surface
-    SDL_Window* window = ( SDL_Window* )creation.window;
-    if ( SDL_Vulkan_CreateSurface( window, vulkan_instance, &vulkan_window_surface ) == SDL_FALSE ) {
-        rprint( "Failed to create Vulkan surface.\n" );
-    }
-
-    sdl_window = window;
-
     VkPhysicalDevice discrete_gpu = VK_NULL_HANDLE;
     VkPhysicalDevice integrated_gpu = VK_NULL_HANDLE;
     for ( u32 i = 0; i < num_physical_device; ++i ) {
@@ -367,21 +332,12 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         vkGetPhysicalDeviceProperties( physical_device, &vulkan_physical_properties );
 
         if ( vulkan_physical_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ) {
-            if ( get_family_queue( physical_device ) ) {
-                // NOTE(marco): prefer discrete GPU over integrated one, stop at first discrete GPU that has
-                // present capabilities
-                discrete_gpu = physical_device;
-                break;
-            }
-
+            discrete_gpu = physical_device;
             continue;
         }
 
         if ( vulkan_physical_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ) {
-            if ( get_family_queue( physical_device ) ) {
-                integrated_gpu = physical_device;
-            }
-
+            integrated_gpu = physical_device;
             continue;
         }
     }
@@ -530,7 +486,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
 #endif // DEBUG
 
         // Search for main queue that should be able to do all work (graphics, compute and transfer)
-        if ( (queue_family.queueFlags & ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT )) == ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT ) ) {
+        if ( (queue_family.queueFlags & ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT  )) == ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT  ) ) {
             main_queue_family_index = fi;
 
             RASSERT( ( queue_family.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT ) == VK_QUEUE_SPARSE_BINDING_BIT );
@@ -777,6 +733,15 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     if ( vulkan_transfer_queue_family < queue_family_count ) {
         vkGetDeviceQueue( vulkan_device, transfer_queue_family_index, 0, &vulkan_transfer_queue );
     }
+
+    //////// Create drawable surface
+    // Create surface
+    SDL_Window* window = ( SDL_Window* )creation.window;
+    if ( SDL_Vulkan_CreateSurface( window, vulkan_instance, &vulkan_window_surface ) == SDL_FALSE ) {
+        rprint( "Failed to create Vulkan surface.\n" );
+    }
+
+    sdl_window = window;
 
     // Create Framebuffers
     int window_width, window_height;
@@ -1367,6 +1332,8 @@ static void vulkan_create_texture( GpuDevice& gpu, const TextureCreation& creati
 
     VmaAllocationCreateInfo memory_info{};
     memory_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    rprint( "creating tex %s\n", creation.name );
 
     if ( creation.alias.index == k_invalid_texture.index ) {
         if ( is_sparse_texture ) {
@@ -2182,8 +2149,6 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
         pipeline_info.pStages = shader_state_data->shader_stage_info;
         pipeline_info.groupCount = shader_state_data->active_shaders;
         pipeline_info.pGroups = shader_state_data->shader_group_info;
-        // It determines the maximum number of call
-        // stacks in case we have a recursive call to the rayTraceEXT function
         pipeline_info.maxPipelineRayRecursionDepth = 1;
         pipeline_info.pLibraryInfo = nullptr;
         pipeline_info.pLibraryInterface = nullptr;
@@ -2194,7 +2159,6 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
 
         pipeline->vk_bind_point = VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
 
-        // sbt
         u32 group_handle_size = ray_tracing_pipeline_properties.shaderGroupHandleSize;
         sizet shader_binding_table_size = group_handle_size * shader_state_data->active_shaders;
 
@@ -2204,7 +2168,6 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
 
         check( vkGetRayTracingShaderGroupHandlesKHR( vulkan_device, pipeline->vk_pipeline, 0, shader_state_data->active_shaders, shader_binding_table_size, shader_binding_table_data.data ) );
 
-        // They are stored in separate buffers
         BufferCreation shader_binding_table_creation{ };
         shader_binding_table_creation.set( VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR, ResourceUsageType::Immutable, group_handle_size ).set_data( shader_binding_table_data.data ).set_name( "shader_binding_table_raygen" );
         pipeline->shader_binding_table_raygen = create_buffer( shader_binding_table_creation );
@@ -2697,6 +2660,11 @@ DescriptorSetHandle GpuDevice::create_descriptor_set( const DescriptorSetCreatio
     descriptor_set->layout = descriptor_set_layout;
 
     RASSERTM( creation.num_resources < k_max_descriptors_per_set, "Overflow in resources, please bump k_max_descriptors_per_set." );
+
+    // TODO: fix gltf problems and enable this. It asserts when creating draws.
+    if ( descriptor_set_layout->set_index != 0 ) {
+        //RASSERTM( creation.num_resources == descriptor_set_layout->num_bindings, "DescriptorSet creation mismatch: passed descriptors %u, layout descriptors %u\n", creation.num_resources, descriptor_set_layout->num_bindings );
+    }
 
     // Update descriptor set
     VkWriteDescriptorSet descriptor_write[ k_max_descriptors_per_set ];
@@ -4589,6 +4557,7 @@ void GpuDevice::frame_counters_advance() {
 
 VkDeviceAddress GpuDevice::get_buffer_device_address( BufferHandle handle ) {
     Buffer* buffer = access_buffer( handle );
+    RASSERT( buffer != nullptr );
 
     VkBufferDeviceAddressInfoKHR device_address_info{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR };
     device_address_info.buffer = buffer->vk_buffer;

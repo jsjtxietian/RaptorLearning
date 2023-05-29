@@ -85,9 +85,9 @@ struct FrameGraphResource {
     FrameGraphNodeHandle                    producer;
     FrameGraphResourceHandle                output_handle;
 
-    i32                                     ref_count = 0;
+    i32                                     ref_count   = 0;
 
-    const char*                             name = nullptr;
+    const char*                             name        = nullptr;
 };
 
 struct FrameGraphResourceInputCreation {
@@ -164,13 +164,13 @@ struct FrameGraphRenderPassCache {
 };
 
 struct FrameGraphResourceCache {
-    void                                        init( Allocator* allocator, GpuDevice* device );
-    void                                        shutdown( );
+    void                                    init( Allocator* allocator, GpuDevice* device );
+    void                                    shutdown( );
 
-    GpuDevice*                                  device;
+    GpuDevice*                              device;
 
-    FlatHashMap<u64, u32>                       resource_map;
-    ResourcePoolTyped<FrameGraphResource>       resources;
+    FlatHashMap<u64, u32>                   resource_map;
+    ResourcePoolTyped<FrameGraphResource>   resources;
 };
 
 struct FrameGraphNodeCache {

@@ -175,7 +175,7 @@ GpuTechnique* RenderResourcesLoader::load_gpu_technique( cstring json_path, bool
                     pipeline_i[ "name" ].get_to( name );
 
                     if ( name == inherited_name ) {
-                        add_pass = parse_gpu_pipeline( pipeline_i, pc, path_buffer, shader_code_buffer, temp_allocator, renderer, frame_graph, pass_name_buffer, vertex_input_creations, name_to_vertex_inputs, technique_creation.name, false, true );
+                        add_pass = parse_gpu_pipeline( pipeline_i, pc, path_buffer, shader_code_buffer, temp_allocator, renderer, frame_graph, pass_name_buffer, vertex_input_creations, name_to_vertex_inputs, technique_creation.name, false, true  );
                         break;
                     }
                 }
@@ -382,9 +382,9 @@ bool parse_gpu_pipeline( nlohmann::json& pipeline, raptor::PipelineCreation& pc,
             std::string name;
 
             path_buffer.clear();
-
+            
             // Cache file hashes
-            u64 shader_file_hashes[ 16 ];
+            u64 shader_file_hashes[16];
             u32 shader_file_hashes_count = 0;
             // Read file and concatenate it
             // Cache current shader code beginning
@@ -397,7 +397,7 @@ bool parse_gpu_pipeline( nlohmann::json& pipeline, raptor::PipelineCreation& pc,
                 for ( sizet in = 0; in < includes.size(); ++in ) {
                     includes[ in ].get_to( name );
                     u64 shader_file_hash = shader_concatenate( name.c_str(), path_buffer, shader_buffer, temp_allocator );
-                    shader_file_hashes[ shader_file_hashes_count++ ] = shader_file_hash;
+                    shader_file_hashes[ shader_file_hashes_count++] = shader_file_hash;
                     //rprint( " %016llx", shader_file_hash );
                 }
             }
@@ -415,7 +415,7 @@ bool parse_gpu_pipeline( nlohmann::json& pipeline, raptor::PipelineCreation& pc,
 
             // Debug print of final code if needed.
             //rprint( "\n\n%s\n\n\n", code );
-            u32 code_size = u32( strlen( code ) );
+            u32 code_size = u32(strlen( code ));
 
             ShaderStage shader_stage;
             shader_stage.code = code;
@@ -439,7 +439,7 @@ bool parse_gpu_pipeline( nlohmann::json& pipeline, raptor::PipelineCreation& pc,
                     return false;
                 }
                 shader_stage.type = VK_SHADER_STAGE_TASK_BIT_NV;
-            } else if ( name == "raygen" ) {
+            } else if ( name == "raygen") {
                 if ( !renderer->gpu->ray_tracing_present ) {
                     RASSERT( false );
                     return false;
@@ -448,7 +448,7 @@ bool parse_gpu_pipeline( nlohmann::json& pipeline, raptor::PipelineCreation& pc,
                 rt_shader_pass = true;
 
                 shader_stage.type = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-            } else if ( name == "closest_hit" ) {
+            } else if ( name == "closest_hit") {
                 if ( !renderer->gpu->ray_tracing_present ) {
                     RASSERT( false );
                     return false;
@@ -457,7 +457,7 @@ bool parse_gpu_pipeline( nlohmann::json& pipeline, raptor::PipelineCreation& pc,
                 rt_shader_pass = true;
 
                 shader_stage.type = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-            } else if ( name == "miss" ) {
+            } else if ( name == "miss") {
                 if ( !renderer->gpu->ray_tracing_present ) {
                     RASSERT( false );
                     return false;
@@ -528,18 +528,20 @@ bool parse_gpu_pipeline( nlohmann::json& pipeline, raptor::PipelineCreation& pc,
                         // Write spirv
                         file_write_binary( shader_spirv_path, ( void* )shader_create_info.pCode, sizeof( u32 ) * shader_create_info.codeSize );
                     }
-                } else {
+                }
+                else {
                     rprint( "Error compiling shader %s stage %s", pc.shaders.name, to_compiler_extension( shader_stage.type ) );
                     return false;
                 }
-            } else {
+            }
+            else {
                 // Shader is the same, read cached SpirV
                 FileReadResult frr = file_read_binary( shader_spirv_path, temp_allocator );
 
                 shader_stage.code = reinterpret_cast< cstring >( frr.data );
                 shader_stage.code_size = ( u32 )frr.size / sizeof( u32 );
             }
-
+            
             // Finally add the stage
             pc.shaders.add_stage( shader_stage.code, shader_stage.code_size, shader_stage.type );
             // Output always spv compiled shaders
@@ -649,9 +651,11 @@ bool parse_gpu_pipeline( nlohmann::json& pipeline, raptor::PipelineCreation& pc,
             // TODO: handle better
             if ( name == "swapchain" ) {
                 pc.render_pass = renderer->gpu->get_swapchain_output();
-            } else if ( compute_shader_pass ) {
+            }
+            else if ( compute_shader_pass ) {
                 pc.render_pass = renderer->gpu->get_swapchain_output();
-            } else {
+            }
+            else {
                 const RenderPass* render_pass = renderer->gpu->access_render_pass( node->render_pass );
                 if ( render_pass )
                     pc.render_pass = render_pass->output;

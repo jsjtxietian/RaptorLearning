@@ -180,8 +180,6 @@ struct GpuDevice : public Service {
 
     void                            frame_counters_advance();
 
-    bool                            get_family_queue( VkPhysicalDevice physical_device );
-
     VkDeviceAddress                 get_buffer_device_address( BufferHandle handle );
     VkShaderModuleCreateInfo        compile_shader( cstring code, u32 code_size, VkShaderStageFlagBits stage, cstring name );
 

@@ -18,14 +18,12 @@ layout( binding = 3, set = MATERIAL_SET ) uniform rayParams
     uint sbt_offset; // shader binding table offset
     uint sbt_stride; // shader binding table stride
     uint miss_index;
-    uint out_image_index; // the index of the image in bindless image array to which we are going to write
+    uint out_image_index;
 };
 
 // NOTE(marco): adapted from https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-generating-camera-rays/generating-camera-rays
 vec3 compute_ray_dir( uvec3 launchID, uvec3 launchSize) {
-    // in NDC
     float x = ( 2 * ( float( launchID.x ) + 0.5 ) / float( launchSize.x ) - 1.0 );
-    // invert y
     float y = ( 1.0 - 2 * ( float( launchID.y ) + 0.5 ) / float( launchSize.y ) );
     vec4 dir = inverse_view_projection * vec4( x, y, 1, 1 );
     dir = normalize( dir );
@@ -35,7 +33,7 @@ vec3 compute_ray_dir( uvec3 launchID, uvec3 launchSize) {
 
 void main()
 {
-    traceRayEXT( as, // topLevel acceleration structure
+    traceRayEXT( as, // topLevel
                  gl_RayFlagsOpaqueEXT, // rayFlags
                  0xff, // cullMask
                  sbt_offset, // sbtRecordOffset
@@ -116,7 +114,6 @@ void main()
 
 #ifdef CLOSEST_HIT_TEST
 
-// the payload is now defined with the rayPayloadInEXT qualifier
 layout( location = 0 ) rayPayloadInEXT ray_payload payload;
 hitAttributeEXT vec2 barycentric_weights;
 
