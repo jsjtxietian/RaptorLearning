@@ -628,7 +628,9 @@ void main() {
 
     float c1 = 0.003;
     float c2 = 0.017;
+    // proportional difference of depth between the two frames
     float depth_diff = abs( 1.0 - ( previous_position_ndc.z / current_position_ndc.z ) );
+    // determine acceptable changes in depth:
     float eps = c1 + c2 * abs( view_normal.z );
 
     vec2 visibility_motion = depth_diff < eps ? vec2( current_position_ndc.xy - previous_position_ndc.xy ) : vec2( -1, -1 );

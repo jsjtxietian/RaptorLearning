@@ -260,6 +260,7 @@ void main() {
 
     ivec3 tex_coord = ivec3( gl_GlobalInvocationID.xyz );
 
+    //  compute the difference between the minimum and maximum value over the past four frames
     vec4 last_visibility_values = texelFetch( global_textures_3d[ visibility_cache_texture_index ], tex_coord, 0 );
 
     float max_v = max( max( max( last_visibility_values.x, last_visibility_values.y ), last_visibility_values.z ), last_visibility_values.w );
@@ -454,6 +455,7 @@ void main() {
 
     // NOTE(marco): 13x13 tent filter
     // TODO(marco): use separable version
+    // smooth out differences between adjacent fragments while still giving more weight to the fragment we are processing
     float spatial_filtered_value = 0.0;
     for ( int y = -6; y <= 6; ++y ) {
         for ( int x = -6; x <= 6; ++x ) {
@@ -465,10 +467,12 @@ void main() {
         }
     }
 
+    // combine this value with temporal data
     vec4 last_variation_values = texelFetch( global_textures_3d[ variation_cache_texture_index ], global_index, 0 );
 
     float filtered_value = 0.5 * ( spatial_filtered_value + 0.25 * ( last_variation_values.x + last_variation_values.y + last_variation_values.z + last_variation_values.w ) );
 
+    // pdate the variation cache for the next frame
     last_variation_values.w = last_variation_values.z;
     last_variation_values.z = last_variation_values.y;
     last_variation_values.y = last_variation_values.x;
@@ -480,8 +484,12 @@ void main() {
     uvec4 sample_count_history = texelFetch( global_utextures_3d[ samples_count_cache_texture_index ], global_index, 0 );
     const float raw_depth = texelFetch( global_textures[ depth_texture_index ], scaled_xy.xy, 0).r;
 
+    // If the reprojection in the previous pass has failed,
+    // simply use the maximum sample count
     uint sample_count = MAX_SHADOW_VISIBILITY_SAMPLE_COUNT;
     if ( motion_vectors_value.r != -1.0 ) {
+        // get the sample count for the last frame and determine whether
+        // the sample count has been stable over the past four frames
         sample_count = sample_count_history.x;
 
         bool stable_sample_count = ( sample_count_history.x == sample_count_history.y ) && ( sample_count_history.x == sample_count_history.z ) && ( sample_count_history.x == sample_count_history.w );
@@ -490,9 +498,13 @@ void main() {
             sample_count = 0;
         } else {
             float delta = 0.2;
+            // identified a high-variance value across the past four frames and need more samples
+            // to converge to a better result
             if ( filtered_value > delta && sample_count < MAX_SHADOW_VISIBILITY_SAMPLE_COUNT ) {
                 sample_count += 1;
-            } else if ( stable_sample_count && sample_count >= 1 && (filtered_value < delta) ) {
+            }
+            // the sample count has been stable across the past four frames, decrease the sample count.
+            else if ( stable_sample_count && sample_count >= 1 && (filtered_value < delta) ) {
                 sample_count -= 1;
             }
 
@@ -532,6 +544,8 @@ void main() {
         }
     }
 
+    // update visibility history cache. 
+    // If the reprojection was successful, simply add the new value    
     vec4 last_visibility_values = vec4(0);
     if ( motion_vectors_value.r != -1.0 ) {
         last_visibility_values = texelFetch( global_textures_3d[ visibility_cache_texture_index ], global_index, 0 );
@@ -540,12 +554,14 @@ void main() {
         last_visibility_values.z = last_visibility_values.y;
         last_visibility_values.y = last_visibility_values.x;
     } else {
+        // overwrite all history entries with the new visibility value
         last_visibility_values.w = visibility;
         last_visibility_values.z = visibility;
         last_visibility_values.y = visibility;
     }
     last_visibility_values.x = visibility;
 
+    // update the sample count cache
     sample_count_history.w = sample_count_history.z;
     sample_count_history.z = sample_count_history.y;
     sample_count_history.y = sample_count_history.x;
@@ -591,6 +607,7 @@ float visibility_temporal_filter( ivec3 index ) {
 
     vec4 last_visibility_values = texelFetch( global_textures_3d[ visibility_cache_texture_index ], index, 0 );
 
+    // simple temporal filter
     float filtered_visibility = 0.25 * ( last_visibility_values.x + last_visibility_values.y + last_visibility_values.z + last_visibility_values.w );
 
     return filtered_visibility;
@@ -692,6 +709,7 @@ void main() {
     memoryBarrierShared();
     barrier();
 
+    // Gaussian kernel
     float spatial_filtered_value = 0.0;
     vec3 p_normal = local_normal_data[ local_index.y ][ local_index.x ];
     for ( int y = -2; y <= 2; ++y ) {
@@ -700,6 +718,7 @@ void main() {
 
             vec3 q_normal = local_normal_data[ local_index.y + y ][ local_index.x + x ];
 
+            // if the normals of adjacent fragments diverge, ignore this data point
             if ( dot( p_normal, q_normal ) <= 0.9 ) {
                 continue;
             }

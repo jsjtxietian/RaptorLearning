@@ -324,8 +324,10 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
     const float r = raytraced_shadow_light_radius;
     float attenuation = attenuation_square_falloff(position_to_light, 1.0f / r);
 
+    // trace rays through the scene only if this light is close enough and it’s not behind geometry at this fragment
     const float scaled_distance = r / d;
     if ( (NoL > 0.001f) && (d <= r) && (attenuation > 0.001f) ) {
+        // trace one ray per sample
         for ( uint s = 0; s < sample_count; ++s ) {
 #if 0
             vec2 poisson_sample = POISSON_SAMPLES[ s * FRAME_HISTORY_COUNT + frame_index ];
@@ -340,6 +342,7 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
 
 
 #if 1
+            // compute the ray direction by using a pre-computed Poisson disk
             vec2 poisson_sample = POISSON_SAMPLES[ (s * FRAME_HISTORY_COUNT + frame_index) % SAMPLE_NUM ];
             vec3 random_x = x_axis * poisson_sample.x * (scaled_distance) * 0.01;
             vec3 random_y = y_axis * poisson_sample.y * (scaled_distance) * 0.01;
@@ -352,15 +355,17 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
             rayQueryEXT rayQuery;
             rayQueryInitializeEXT(rayQuery,
                                   as,
-                                  gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+                                  gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, // only interested in the first hit for this ray.
                                   0xff,
                                   world_position,
                                   0.05,
                                   random_dir,
                                   d);
-            rayQueryProceedEXT( rayQuery );
+            // start scene traversal
+            rayQueryProceedEXT( rayQuery ); 
 
             if (rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+                // accumulate the visibility value for each direction the light is visible from:
                 visiblity += rayQueryGetIntersectionTEXT(rayQuery, true) < d ? 0.0f : 1.0f;
             }
             else {
