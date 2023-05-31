@@ -85,9 +85,9 @@ struct FrameGraphResource {
     FrameGraphNodeHandle                    producer;
     FrameGraphResourceHandle                output_handle;
 
-    i32                                     ref_count   = 0;
+    i32                                     ref_count = 0;
 
-    const char*                             name        = nullptr;
+    const char*                             name = nullptr;
 };
 
 struct FrameGraphResourceInputCreation {
@@ -130,6 +130,8 @@ struct FrameGraphRenderPass
     virtual void                            on_resize( GpuDevice& gpu, FrameGraph* frame_graph, u32 new_width, u32 new_height ) {}
     virtual void                            update_dependent_resources( GpuDevice& gpu, FrameGraph* frame_graph, RenderScene* render_scene ) {}
 
+    virtual void                            reload_shaders( RenderScene& scene, FrameGraph* frame_graph, Allocator* resident_allocator, StackAllocator* scratch_allocator ) {}
+
     bool                                    enabled = true;
 };
 
@@ -146,14 +148,13 @@ struct FrameGraphNode {
 
     Array<FrameGraphNodeHandle>             edges;
 
-    f32                                     resolution_scale_width  = 0.f;
+    f32                                     resolution_scale_width = 0.f;
     f32                                     resolution_scale_height = 0.f;
+    bool                                    compute = false;
+    bool                                    ray_tracing = false;
+    bool                                    enabled = true;
 
-    bool                                    compute                 = false;
-    bool                                    ray_tracing             = false;
-    bool                                    enabled                 = true;
-
-    const char*                             name                    = nullptr;
+    const char*                             name    = nullptr;
 };
 
 struct FrameGraphRenderPassCache {
@@ -164,13 +165,13 @@ struct FrameGraphRenderPassCache {
 };
 
 struct FrameGraphResourceCache {
-    void                                    init( Allocator* allocator, GpuDevice* device );
-    void                                    shutdown( );
+    void                                        init( Allocator* allocator, GpuDevice* device );
+    void                                        shutdown( );
 
-    GpuDevice*                              device;
+    GpuDevice*                                  device;
 
-    FlatHashMap<u64, u32>                   resource_map;
-    ResourcePoolTyped<FrameGraphResource>   resources;
+    FlatHashMap<u64, u32>                       resource_map;
+    ResourcePoolTyped<FrameGraphResource>       resources;
 };
 
 struct FrameGraphNodeCache {
@@ -234,6 +235,7 @@ struct FrameGraph {
     void                            add_ui();
     void                            render( u32 current_frame_index, CommandBuffer* gpu_commands, RenderScene* render_scene );
     void                            on_resize( GpuDevice& gpu, u32 new_width, u32 new_height );
+    void                            reload_shaders( RenderScene& scene, Allocator* resident_allocator, StackAllocator* scratch_allocator );
 
     void                            debug_ui();
 

@@ -39,8 +39,6 @@ layout(std430, set = MATERIAL_SET, binding = 43) readonly buffer ProbeStatusSSBO
 
 layout( location = 0 ) rayPayloadEXT RayPayload payload;
 
-// spawns rays from the probe’s position using random
-// directions on a sphere using spherical Fibonacci sequences
 void main() {
 	const ivec2 pixel_coord = ivec2(gl_LaunchIDEXT.xy);
     const int probe_index = pixel_coord.y + probe_update_offset;
@@ -56,7 +54,6 @@ void main() {
         return;
     }
 
-    // convert from linear probe index to grid probe indices and then position
     ivec3 probe_grid_indices = probe_index_to_grid_indices( probe_index );
     vec3 ray_origin = grid_indices_to_world( probe_grid_indices, probe_index );
     vec3 direction = normalize( mat3(random_rotation) * spherical_fibonacci(ray_index, probe_rays) );
@@ -73,7 +70,7 @@ void main() {
 #if defined (CLOSEST_HIT_PROBE_RT)
 
 layout( location = 0 ) rayPayloadInEXT RayPayload payload;
-hitAttributeEXT vec2 barycentric_weights; // to calculate the correct triangle data
+hitAttributeEXT vec2 barycentric_weights;
 
 // todo: move this somewhere else.
 float attenuation_square_falloff(vec3 position_to_light, float light_inverse_radius) {
@@ -93,7 +90,6 @@ void main() {
         distance *= -0.2;        
     }
     else {
-        // read the mesh instance data and read the index buffer:
         uint mesh_index = mesh_instance_draws[ gl_GeometryIndexEXT ].mesh_draw_index;
         MeshDraw mesh = mesh_draws[ mesh_index ];
 
@@ -102,7 +98,6 @@ void main() {
         int i1 = index_buffer[ gl_PrimitiveID * 3 + 1 ].v;
         int i2 = index_buffer[ gl_PrimitiveID * 3 + 2 ].v;
 
-        // read the vertices from the mesh buffer and calculate the world space position:
         float_array_type vertex_buffer = float_array_type( mesh.position_buffer );
         vec4 p0 = vec4(
             vertex_buffer[ i0 * 3 + 0 ].v,
@@ -123,13 +118,11 @@ void main() {
             1.0
         );
 
-        // Calculate the world position:
         const mat4 transform = mesh_instance_draws[ gl_GeometryIndexEXT ].model;
         vec4 p0_world = transform * p0;
         vec4 p1_world = transform * p1;
         vec4 p2_world = transform * p2;
 
-        // read the UV buffer and calculate the final UVs of the triangle:
         // float_array_type uv_buffer = float_array_type( mesh.uv_buffer );
         // vec2 uv0 = vec2(uv_buffer[ i0 * 2 ].v, uv_buffer[ i0 * 2 + 1].v);
         // vec2 uv1 = vec2(uv_buffer[ i1 * 2 ].v, uv_buffer[ i1 * 2 + 1].v);
@@ -149,7 +142,7 @@ void main() {
         // Use lower texture Lod to increase performances.
         vec3 albedo = textureLod( global_textures[ nonuniformEXT( mesh.textures.x ) ], uv, 3 ).rgb;
 
-        // Read the triangle normals and calculate the final normal.
+        // Compute plane normal
         // vec3 v0_v1 = p1_world.xyz - p0_world.xyz;
         // vec3 v0_v2 = p2_world.xyz - p0_world.xyz;
         // vec3 normal = normalize(cross( v0_v1, v0_v2 ));
@@ -172,7 +165,6 @@ void main() {
         const mat3 normal_transform = mat3(mesh_instance_draws[ gl_GeometryIndexEXT ].model_inverse);
         normal = normal_transform * normal;
 
-        // calculate the world position and the normal, and then calculate the direct lighting:
         const vec3 world_position = a * p0_world.xyz + b * p1_world.xyz + c * p2_world.xyz;
 
         // TODO: calculate lighting.
@@ -196,8 +188,7 @@ void main() {
             diffuse += albedo * sample_irradiance( world_position, normal, camera_position.xyz ) * infinite_bounces_multiplier;
         }
 
-        // cache the radiance and the distance
-        // payload = vec4( barycentric_weights, 0.0, 1.0 );
+        //payload = vec4( barycentric_weights, 0.0, 1.0 );
         radiance = diffuse;
         distance = gl_RayTminEXT + gl_HitTEXT;
     }
@@ -213,7 +204,6 @@ void main() {
 layout( location = 0 ) rayPayloadInEXT RayPayload payload;
 
 void main() {
-    // return the sky color
 	payload.radiance = vec3( 0.529, 0.807, 0.921 );
     payload.distance = 1000.0f;
 }
@@ -222,10 +212,6 @@ void main() {
 
 
 #if defined(COMPUTE_PROBE_UPDATE_IRRADIANCE) || defined(COMPUTE_PROBE_UPDATE_VISIBILITY)
-
-// This shader will be executed twice
-// once to update the irradiance and once to update the visibility. 
-// It will also update the borders to add support for bilinear filtering.
 
 layout(rgba16f, set = MATERIAL_SET, binding = 41) uniform image2D irradiance_image;
 layout(rg16f, set = MATERIAL_SET, binding = 42) uniform image2D visibility_image;
@@ -269,9 +255,6 @@ void main() {
     border_pixel = border_pixel || ((gl_GlobalInvocationID.y % probe_with_border_side) == 0) || ((gl_GlobalInvocationID.y % probe_with_border_side ) == probe_last_pixel );
 
     // Perform full calculations
-    // calculate a weight based on ray direction 
-    // and the direction of the sphere encoded with octahedral coordinates,
-    // and calculate the irradiance as the summed weight of the radiances:
     if ( !border_pixel ) {
         vec4 result = vec4(0);
 
@@ -280,7 +263,6 @@ void main() {
         uint backfaces = 0;
         uint max_backfaces = uint(probe_rays * 0.1f);
 
-        // Add the contribution from each ray:
         for ( int ray_index = 0; ray_index < probe_rays; ++ray_index ) {
             ivec2 sample_position = ivec2( ray_index, probe_index );
 
@@ -290,7 +272,6 @@ void main() {
 
             float weight = max(0.0, dot(texel_direction, ray_direction));
 
-            // Read the distance for this ray and early out if there are too many back faces:
             float distance2 = texelFetch(global_textures[nonuniformEXT(radiance_output_index)], sample_position, 0).w;
             if ( distance2 < 0.0f && use_backfacing_blending() ) {
                 ++backfaces;
@@ -311,7 +292,6 @@ void main() {
                 result += vec4(radiance * weight, weight);
             }
 #else
-            // read and limit the distance:
             // TODO: spacing is 1.0f
             float probe_max_ray_distance = 1.0f * 1.5f;
 
@@ -366,7 +346,6 @@ void main() {
     groupMemoryBarrier();
     barrier();
 
-    // need to read the pixels in a specific order to ensure bilinear filtering is working properly.
     // Copy border pixel calculating source pixels.
     const uint probe_pixel_x = gl_GlobalInvocationID.x % probe_with_border_side;
     const uint probe_pixel_y = gl_GlobalInvocationID.y % probe_with_border_side;
@@ -441,9 +420,6 @@ layout(std430, set = MATERIAL_SET, binding = 43) buffer ProbeStatusSSBO {
 
 #if defined(COMPUTE_CALCULATE_PROBE_OFFSETS)
 
-// It calculates a per-probe world-space offset to avoid intersecting probes with geometries.
-// cleverly uses the per-ray distances coming from the ray tracing pass to calculate the offset based on backface and frontface counts
-
 layout (local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 void main() {
 
@@ -467,8 +443,6 @@ void main() {
     float farthest_frontface_distance = 0;
 
     int backfaces_count = 0;
-    // For each ray of this probe, read the distance and calculate 
-    // if it is a front or backface, store negative distances for backfaces in the hit shader:
     // For each ray cache front/backfaces index and distances.
     for (int ray_index = 0; ray_index < probe_rays; ++ray_index) {
 
@@ -497,8 +471,6 @@ void main() {
         }
     }
 
-    // check if the probe can be considered inside a geometry and calculate an offset moving
-    // away from that direction, but within the probe spacing limit, that can call a cell:
     vec3 full_offset = vec3(10000.f);
     vec3 cell_offset_limit = max_probe_offset * probe_spacing;
 
@@ -530,7 +502,6 @@ void main() {
     }
     else if (closest_frontface_distance < 0.05f) {
         // In this case we have a very small hit distance.
-        // If have not hit a backface, must move the probe slightly to put it in a resting position:
 
         // Ensure that we never move through the farthest frontface
         // Move minimum distance to ensure not moving on a future iteration.
@@ -657,8 +628,7 @@ ivec2 pixel_offsets[] = ivec2[]( ivec2(0,0), ivec2(0,1), ivec2(1,0), ivec2(1,1))
 
 layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 void main() {
-    // When using the quarter resolution, cycle through a
-    // neighborhood of 2x2 pixels and get the closest depth, and save the pixel index:
+
     ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
 
     int resolution_divider = output_resolution_half == 1 ? 2 : 1;
@@ -701,7 +671,6 @@ void main() {
         normal = octahedral_decode(encoded_normal);
     }
 
-    // gather the world position and use the normal to sample the irradiance
     const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, inverse_view_projection);
     
     vec3 irradiance = sample_irradiance( pixel_world_position, normal, camera_position.xyz );

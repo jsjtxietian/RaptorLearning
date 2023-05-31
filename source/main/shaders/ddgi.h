@@ -235,7 +235,6 @@ vec3 sample_irradiance( vec3 world_position, vec3 normal, vec3 camera_position )
 
     const vec3 Wo = normalize(camera_position.xyz - world_position);
     // Bias vector to offset probe sampling based on normal and view vector.
-    // starts by calculating a bias vector to move the sampling so that it’s a little bit in front of the geometry, to help with leaks
     const float minimum_distance_between_probes = 1.0f;
     vec3 bias_vector = (normal * 0.2f + Wo * 0.8f) * (0.75f * minimum_distance_between_probes) * self_shadow_bias;
 
@@ -245,13 +244,9 @@ vec3 sample_irradiance( vec3 world_position, vec3 normal, vec3 camera_position )
     ivec3 base_grid_indices = world_to_grid_indices(biased_world_position);
     vec3 base_probe_world_position = grid_indices_to_world_no_offsets( base_grid_indices );
 
-    // now have the grid world position and indices at the sampling world position (plus the bias)
-    // calculate a per-axis value of where the sampling position is within the cell
-
     // alpha is how far from the floor(currentVertex) position. on [0, 1] for each axis.
     vec3 alpha = clamp((biased_world_position - base_probe_world_position) , vec3(0.0f), vec3(1.0f));
 
-    // sample the eight adjacent probes to the sampling point
     vec3  sum_irradiance = vec3(0.0f);
     float sum_weight = 0.0f;
 
@@ -293,7 +288,6 @@ vec3 sample_irradiance( vec3 world_position, vec3 normal, vec3 camera_position )
             weight *= (dir_dot_n * dir_dot_n) + 0.2;
         }
 
-        // This test is based on variance, such as Variance Shadow Map:
         // Bias the position at which visibility is computed; this avoids performing a shadow 
         // test *at* a surface, which is a dangerous location because that is exactly the line
         // between shadowed and unshadowed. If the normal bias is too small, there will be
@@ -314,7 +308,6 @@ vec3 sample_irradiance( vec3 world_position, vec3 normal, vec3 camera_position )
             float mean_distance_to_occluder = visibility.x;
 
             float chebyshev_weight = 1.0;
-            // Check if the sampled probe is in “shadow” and calculate the Chebyshev weight:
             if (distance_to_biased_point > mean_distance_to_occluder) {
                 // In "shadow"
                 float variance = abs((visibility.x * visibility.x) - visibility.y);
@@ -343,7 +336,6 @@ vec3 sample_irradiance( vec3 world_position, vec3 normal, vec3 camera_position )
             weight *= (weight * weight) * (1.f / (crushThreshold * crushThreshold));
         }
 
-        // apply the trilinear offset, read the irradiance, and calculate its contribution
         vec2 uv = get_probe_uv(normal, probe_index, irradiance_texture_width, irradiance_texture_height, irradiance_side_length );
 
         vec3 probe_irradiance = textureLod(global_textures[nonuniformEXT(grid_irradiance_output_index)], uv, 0).rgb;

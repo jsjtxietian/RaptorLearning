@@ -71,6 +71,11 @@ layout ( std140, set = MATERIAL_SET, binding = 23 ) uniform LightConstants {
 
     vec3        raytraced_shadow_light_position;
     float       raytraced_shadow_light_intensity;
+
+    uint        brdf_lut_texture_index;
+    uint        pad001_lc;
+    uint        pad002_lc;
+    uint        pad003_lc;
 };
 
 layout( set = MATERIAL_SET, binding = 25 ) readonly buffer LightIndices {
@@ -324,10 +329,8 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
     const float r = raytraced_shadow_light_radius;
     float attenuation = attenuation_square_falloff(position_to_light, 1.0f / r);
 
-    // trace rays through the scene only if this light is close enough and it’s not behind geometry at this fragment
     const float scaled_distance = r / d;
     if ( (NoL > 0.001f) && (d <= r) && (attenuation > 0.001f) ) {
-        // trace one ray per sample
         for ( uint s = 0; s < sample_count; ++s ) {
 #if 0
             vec2 poisson_sample = POISSON_SAMPLES[ s * FRAME_HISTORY_COUNT + frame_index ];
@@ -342,7 +345,6 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
 
 
 #if 1
-            // compute the ray direction by using a pre-computed Poisson disk
             vec2 poisson_sample = POISSON_SAMPLES[ (s * FRAME_HISTORY_COUNT + frame_index) % SAMPLE_NUM ];
             vec3 random_x = x_axis * poisson_sample.x * (scaled_distance) * 0.01;
             vec3 random_y = y_axis * poisson_sample.y * (scaled_distance) * 0.01;
@@ -355,17 +357,15 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
             rayQueryEXT rayQuery;
             rayQueryInitializeEXT(rayQuery,
                                   as,
-                                  gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, // only interested in the first hit for this ray.
+                                  gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
                                   0xff,
                                   world_position,
                                   0.05,
                                   random_dir,
                                   d);
-            // start scene traversal
-            rayQueryProceedEXT( rayQuery ); 
+            rayQueryProceedEXT( rayQuery );
 
             if (rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
-                // accumulate the visibility value for each direction the light is visible from:
                 visiblity += rayQueryGetIntersectionTEXT(rayQuery, true) < d ? 0.0f : 1.0f;
             }
             else {
@@ -516,6 +516,7 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
 
     return pixel_luminance;
 }
+
 
 // Volumetric fog application
 vec3 apply_volumetric_fog( vec2 screen_uv, float raw_depth, vec3 color ) {
@@ -670,7 +671,7 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
             final_color.rgb += calculate_directional_light_contribution( albedo, roughness, normal, emissive, world_position, V, F0, NoV, position, raytraced_shadow_light_position );
         }
     }
-    
+
     // Ambient term
     vec3 F = fresnel_schlick_roughness(max(dot(normal, V), 0.0), F0, roughness);
 
@@ -684,6 +685,12 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
 
     const float ao = 1.0f;
     final_color.rgb += (kD * indirect_diffuse) * ao;
+
+    vec3 reflection_color = texture( global_textures[reflections_texture_index], screen_uv ).rgb;
+
+    vec2 envBRDF  = textureLod(global_textures[nonuniformEXT(brdf_lut_texture_index)], vec2(NoV, roughness), 0).rg;
+    vec3 indirect_specular = reflection_color * (F * envBRDF.x + envBRDF.y);
+    final_color.rgb += (indirect_specular) * ao;
 
 #if defined(DEBUG_OPTIONS)
 
